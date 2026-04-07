@@ -59,6 +59,19 @@ const mapSdrRow = (row) => {
   };
 };
 
+const updateUploadedFileProgress = async (fileId, inserted) => {
+  const parsedFileId = toInt(fileId);
+  if (!parsedFileId || !Number.isFinite(inserted) || inserted <= 0) return;
+
+  await pool.query(
+    `UPDATE uploaded_files
+     SET parse_status = 'completed',
+         record_count = COALESCE(record_count, 0) + $2
+     WHERE id = $1`,
+    [parsedFileId, inserted]
+  );
+};
+
 const buildScopeFilter = (caseId, columnName = 'case_id') => {
   if (caseId) {
     return {
@@ -176,6 +189,8 @@ router.post('/records', authenticateToken, async (req, res) => {
       );
       inserted += batch.length;
     }
+
+    await updateUploadedFileProgress(fileId, inserted);
 
     res.json({ inserted });
   } catch (error) {

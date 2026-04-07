@@ -2,7 +2,7 @@ import { useState, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { AlertCircle, CalendarRange, FileText, FolderOpenDot, UploadCloud, X } from 'lucide-react'
 import { toast } from 'sonner'
-import { caseAPI, fileAPI } from '../components/lib/apis'
+import { caseAPI } from '../components/lib/apis'
 import { MultiStepLoader } from '@/components/ui/aceternity/multi-step-loader'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -18,6 +18,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
+import { ingestCaseUploads, type CaseUploadFailure, type CaseUploadSlotKey } from '../lib/caseFileIngestion'
 
 const loadingStates = [
   { text: 'Initializing Workspace...' },
@@ -31,7 +32,7 @@ const OPERATORS = ['Jio', 'Airtel', 'Vi (Vodafone Idea)', 'BSNL', 'MTNL', 'Other
 const CASE_TYPES = ['Cyber Crime', 'Financial Fraud', 'Drug Trafficking', 'Missing Person', 'Terrorism', 'Other']
 
 interface UploadSlot {
-  key: string
+  key: CaseUploadSlotKey
   label: string
   icon: string
   desc: string
@@ -117,24 +118,15 @@ export default function CreateCasePage() {
 
   const getTotalFileCount = () => uploads.reduce((sum, upload) => sum + upload.files.length, 0)
 
-  const uploadFilesToCase = async (caseId: number) => {
-    for (const slot of uploads) {
-      if (slot.files.length === 0) continue
-
-      for (const file of slot.files) {
-        setUploadProgress((prev) => ({ ...prev, [slot.key]: `Uploading ${file.name}...` }))
-
-        try {
-          await fileAPI.upload(String(caseId), file, operator, slot.key)
-          setUploadProgress((prev) => ({ ...prev, [slot.key]: `Uploaded ${file.name}` }))
-        } catch (uploadError) {
-          console.error(`Upload error for ${file.name}:`, uploadError)
-          setUploadProgress((prev) => ({ ...prev, [slot.key]: `Upload failed for ${file.name}` }))
-          toast.error(`Upload failed for ${file.name}`)
-        }
-      }
-    }
-  }
+  const uploadFilesToCase = async (caseId: number): Promise<CaseUploadFailure[]> =>
+    ingestCaseUploads({
+      caseId,
+      operator,
+      uploads,
+      onProgress: (slotKey, message) => {
+        setUploadProgress((prev) => ({ ...prev, [slotKey]: message }))
+      },
+    })
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault()
@@ -162,11 +154,20 @@ export default function CreateCasePage() {
       })
       const caseId = newCase.id || newCase.case?.id
 
+      let uploadFailures: CaseUploadFailure[] = []
       if (getTotalFileCount() > 0 && caseId) {
-        await uploadFilesToCase(caseId)
+        uploadFailures = await uploadFilesToCase(caseId)
+        uploadFailures.forEach((failure) => {
+          console.error(`Upload error for ${failure.fileName}:`, failure.message)
+          toast.error(failure.message)
+        })
       }
 
-      toast.success('Case created successfully')
+      if (uploadFailures.length > 0) {
+        toast.warning(`Case created with ${uploadFailures.length} upload issue${uploadFailures.length > 1 ? 's' : ''}. Review the upload messages.`)
+      } else {
+        toast.success('Case created successfully')
+      }
       navigate(`/case/${caseId}`)
     } catch (submitError: any) {
       const message = submitError.message || 'Failed to create case'
@@ -187,7 +188,7 @@ export default function CreateCasePage() {
             ← Back to Dashboard
           </Button>
           <Badge className="rounded-full border border-shakti-300/25 bg-shakti-50 text-shakti-700 dark:border-shakti-400/20 dark:bg-shakti-500/10 dark:text-shakti-200">
-            Frontend-only refresh
+            Unified intake
           </Badge>
         </div>
 
@@ -205,7 +206,7 @@ export default function CreateCasePage() {
                   <div>
                     <CardTitle className="text-3xl tracking-tight">Create New Case</CardTitle>
                     <CardDescription className="mt-2 max-w-2xl text-base leading-7">
-                      Register a new investigation workspace, capture key metadata, and optionally attach telecom datasets without changing the underlying case flow.
+                      Register a new investigation workspace, capture key metadata, and ingest telecom datasets so analytics are ready as soon as the case opens.
                     </CardDescription>
                   </div>
                 </div>
@@ -373,7 +374,7 @@ export default function CreateCasePage() {
                     </div>
 
                     <div className="rounded-[1.25rem] border border-border/70 bg-muted/40 p-4 text-sm text-muted-foreground">
-                      These filters only shape the existing frontend submission payload. No backend behavior is changed by this refresh.
+                      These dates travel with the case metadata and help frame the telecom review window for investigators.
                     </div>
                   </CardContent>
                 </Card>
@@ -483,7 +484,7 @@ export default function CreateCasePage() {
 
               <div className="flex flex-col gap-3 border-t border-border/70 pt-6 sm:flex-row sm:items-center sm:justify-between">
                 <p className="text-sm text-muted-foreground">
-                  The create-case flow, uploads, and routing remain unchanged. This refresh only improves the frontend shell.
+                  Uploaded files are classified, normalized, and inserted into the analytics tables during case creation.
                 </p>
                 <div className="flex items-center gap-3">
                   <Button type="button" variant="outline" className="rounded-2xl" onClick={() => navigate('/dashboard')} disabled={loading}>

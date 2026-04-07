@@ -555,6 +555,14 @@ export const towerDumpAPI = {
 /*  SDR API                                                           */
 /* ------------------------------------------------------------------ */
 export const sdrAPI = {
+  async insertRecords(caseId: string, records: SdrRecord[], fileId?: string) {
+    const data = await apiClient.request<{ inserted?: number }>('/sdr/records', {
+      method: 'POST',
+      body: { caseId, records, fileId },
+    })
+    return data.inserted || 0
+  },
+
   async listTables(caseId?: string): Promise<string[]> {
     const query = buildSearchParams({ caseId })
     return apiClient.request(`/sdr/tables${query ? `?${query}` : ''}`)

@@ -1,0 +1,166 @@
+{
+  "TelephoneNumber": [
+    "Mobile number allotted",
+    "MOBILE",
+    "TELEPHONE_NUMBER",
+    "Number"
+  ],
+  "Caf Serial Number": [
+    "Caf_Serial_Number",
+    "CAF_SERIAL_NO"
+  ],
+  "Name of Subscriber": [
+    "Name_of_Subscriber",
+    "Name of Subscriber",
+    "NAME_OF_THE_SUBSCRIBER",
+    "END_USER_NAME",
+    "NAME_OF_END_USER",
+    "Name of the Customer",
+    "MOBILE_NUMBER_BELONGS_TO",
+    "Name",
+    "POI Name",
+    "POA Name"
+  ],
+  "Date Of Birth": [
+    "Date_Of_Birth",
+    "Date Of Birth",
+    "AS_BIRTHDATE",
+    "DOB"
+  ],
+  "Father Husband Name": [
+    "Father_Husband_Name",
+    "Father Husband Name",
+    "FATHERS_HUSBANDS_NAME",
+    "Father's/Husband's /Mother's Name",
+    "Name of Father/Husband",
+    "AS_FATHER_HUSBAND_NAME",
+    "Father"
+  ],
+  "Local Address": [
+    "LocalAddress",
+    "Local Address of the Subscriber",
+    "Local (C/O)/(D/O)/(S/O)/(W/O)/(H/O)",
+    "Local House No/Flat No",
+    "Local Street Address/Village",
+    "Local Landmark",
+    "Local Locality/Tehsil",
+    "Local City",
+    "loc_addr_houseno_flatno",
+    "LOC_ADDR_STREET_ADDR_NAME",
+    "LOC_ADDR_LOCALITY",
+    "loc_addr_landmark",
+    "local_addr_district",
+    "LOC_ADDR_POSTL_CODE",
+    "LOCAL_CARE_OF",
+    "LOCAL_CITY_DISTRICT",
+    "LOCAL_STATE_UT",
+    "LOCAL_POSTAL_CODE"
+  ],
+  "Permanent Address": [
+    "Permanent_Address",
+    "Permanent Address",
+    "Permanent Address of the Subsriber",
+    "Permnent (C/O)/(D/O)/(S/O)/(W/O)/(H/O)",
+    "Permnent House No/Flat No",
+    "Permnent Street Address/Village",
+    "Permnent Landmark",
+    "Permnent Locality/Tehsil",
+    "Permnent City",
+    "PERM_ADDR_HOUSENO_FLATNO",
+    "perm_addr_landmark",
+    "PERM_ADDR_STREET_ADDR_NAME",
+    "PERM_ADDR_LOCALITY",
+    "PERM_ADDR_CITY",
+    "perm_addr_district_corp",
+    "PERM_ADDR_POSTL_CODE",
+    "PERMANENT_CARE_OF",
+    "PERMANENT_HOUSE_NO_FLAT_NO",
+    "PERMANENT_STREET_ADDRESS_VILLAGE",
+    "PERMANENT_LANDMARK",
+    "PERMANENT_LOCALITY_TEHSIL",
+    "PERMANENT_CITY_DISTRICT",
+    "PERMANENT_STATE_UT",
+    "PERMANENT_POSTAL_CODE",
+    "Address"
+  ],
+  "AlternatePhoneNo": [
+    "Alternate_Phone_No",
+    "Alternate Phone No",
+    "ALT_CONTACT_NUM_MOBILE",
+    "Alternate Mobile",
+    "Alt Number",
+    "Alternate No"
+  ],
+  "Email ID": [
+    "Email_ID",
+    "Email ID",
+    "Email ID(if any)",
+    "Email"
+  ],
+  "Nationality": [
+    "Nationality",
+    "NATIONALITY"
+  ],
+  "Date of Activation": [
+    "Date_of_Activation",
+    "Date of Activation",
+    "DOA",
+    "ACTIVATION_DATE"
+  ],
+  "Installation Date": [
+    "Installation_Date",
+    "Installation Date",
+    "INIST",
+    "INSTALLATION_DATE"
+  ],
+  "IDCard": [
+    "UID_NO",
+    "Photo_Id_Proof_Details",
+    "Aadhaar Number of Customer",
+    "AADHAAR_NUM_OF_CUSTOMER_EKYC",
+    "POI DETAILS",
+    "PHOTO_ID_DETAILS",
+    "Photo-ID proof Document No",
+    "Aadhaar Number",
+    "Photo ID Document no",
+    "Pol_document_No_of_End_user",
+    "IDCard",
+    "POI NO",
+    "POA No"
+  ],
+  "Connection Type": [
+    "Connection_Type",
+    "Connection Type",
+    "Type of Connection",
+    "Type of Connection: Postpaid/Prepaid"
+  ],
+  "Service Provider": [],
+  "Retailer": [
+    [
+      "Point of sale Code",
+      "Point of Sale Name",
+      "POS_CODE",
+      "POS_NAME",
+      "POS_AGENT_NAME",
+      "Name of Point of Sale",
+      "Name_of_Point_of_Sale",
+      "Point of Sale Agent name(as received from UIDAI)",
+      "Point_of_Sale_Agent_Name",
+      "Complete address of Point of Sale",
+      "Point_of_Sale_Address",
+      "Retailer",
+      "Point of Sale"
+    ]
+  ],
+  "SIM Activation Date": [
+    "SIM_Activation_Date",
+    "SIM Activation Date",
+    "SIM_ACTIVATION"
+  ],
+  "Status of Connection": [
+    "Current_Status_of_Connection",
+    "Current Status of Connection",
+    "Status of Connection"
+  ],
+  "DateCreated": []
+}

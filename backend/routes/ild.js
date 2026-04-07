@@ -5,6 +5,36 @@ import { authenticateToken } from '../middleware/auth.js';
 
 const router = Router();
 const toInt = (v) => { const n = Number(v); return Number.isFinite(n) ? Math.trunc(n) : null; };
+const normalizeRawData = (value) => (value && typeof value === 'object' && !Array.isArray(value) ? value : {});
+const updateUploadedFileProgress = async (fileId, inserted) => {
+  const parsedFileId = toInt(fileId);
+  if (!parsedFileId || !Number.isFinite(inserted) || inserted <= 0) return;
+
+  await pool.query(
+    `UPDATE uploaded_files
+     SET parse_status = 'completed',
+         record_count = COALESCE(record_count, 0) + $2
+     WHERE id = $1`,
+    [parsedFileId, inserted]
+  );
+};
+const buildIldResponseRow = (row) => {
+  const raw = normalizeRawData(row.raw_data);
+  return {
+    ...raw,
+    ...row,
+    calling_party_number: row.calling_party || row.calling_number || raw.calling_party_number || null,
+    called_party_number: row.called_party || row.called_number || raw.called_party_number || null,
+    call_duration_sec: row.duration_sec ?? row.duration ?? raw.call_duration_sec ?? null,
+    first_cell_id: row.cell_id || raw.first_cell_id || null,
+    last_cell_id: raw.last_cell_id || null,
+    circle: row.roaming_circle || raw.circle || null,
+    carrier: raw.carrier || null,
+    operator_name: raw.operator_name || null,
+    orig_carr_name: raw.orig_carr_name || null,
+    term_carr_name: raw.term_carr_name || null,
+  };
+};
 
 /* GET /api/ild/records?caseId=... */
 router.get('/records', authenticateToken, async (req, res) => {
@@ -15,7 +45,7 @@ router.get('/records', authenticateToken, async (req, res) => {
       'SELECT * FROM ild_records WHERE case_id = $1 ORDER BY created_at DESC, id DESC',
       [caseId]
     );
-    res.json(result.rows);
+    res.json(result.rows.map(buildIldResponseRow));
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -49,18 +79,19 @@ router.post('/records', authenticateToken, async (req, res) => {
       const batch = records.slice(i, i + batchSize);
       const values = [];
       const placeholders = batch.map((r, idx) => {
+        const rawData = r.raw_data && typeof r.raw_data === 'object' ? r.raw_data : r;
         values.push(
-          parsedCaseId, fileId || null,
-          r.calling_party || r.calling_number || null,
-          r.called_party || r.called_number || null,
+          parsedCaseId, r.file_id || fileId || null,
+          r.calling_party || r.calling_number || r.calling_party_number || null,
+          r.called_party || r.called_number || r.called_party_number || null,
           r.call_date || null, r.call_time || null,
           r.call_type || null, r.call_direction || null,
-          r.duration_sec ? parseInt(String(r.duration_sec), 10) || 0 : 0,
-          r.international_num || null, r.country_code || null,
+          (r.duration_sec || r.call_duration_sec) ? parseInt(String(r.duration_sec || r.call_duration_sec), 10) || 0 : 0,
+          r.international_num || r.called_party_number || null, r.country_code || null,
           r.destination_country || null,
-          r.imei || null, r.cell_id || null,
-          r.operator || null, r.roaming_circle || null,
-          r.raw_data ? JSON.stringify(r.raw_data) : null
+          r.imei || null, r.cell_id || r.first_cell_id || null,
+          r.operator || r.carrier || r.operator_name || null, r.roaming_circle || r.circle || null,
+          JSON.stringify(rawData || {})
         );
         const offset = idx * 17;
         return `(${Array.from({ length: 17 }, (_, j) => `$${offset + j + 1}`).join(', ')})`;
@@ -78,6 +109,7 @@ router.post('/records', authenticateToken, async (req, res) => {
       );
       inserted += batch.length;
     }
+    await updateUploadedFileProgress(fileId, inserted);
     res.json({ inserted });
   } catch (error) {
     res.status(500).json({ error: error.message });

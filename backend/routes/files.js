@@ -126,9 +126,17 @@ router.post('/upload/:type?', upload.single('file'), handleUploadError, async (r
       return res.status(400).json({ error: 'No file uploaded' });
     }
 
-    const headers = extractHeadersFromFile(req.file.path);
+    const headers = extractHeadersFromFile(req.file.path, expectedType);
     const classification = classifyFile(headers, expectedType);
-    const parseStatus = classification.result === 'ACCEPTED' ? 'pending' : 'failed';
+
+    if (classification.result !== 'ACCEPTED') {
+      removeUploadedFile(req.file?.path);
+      return res.status(400).json({
+        error: classification.message,
+        headers,
+        classification
+      });
+    }
 
     const fileResult = await pool.query(
       `
@@ -152,7 +160,7 @@ router.post('/upload/:type?', upload.single('file'), handleUploadError, async (r
         classification.detectedType || expectedType,
         req.file.size,
         req.file.mimetype,
-        parseStatus,
+        'pending',
         req.user.userId
       ]
     );

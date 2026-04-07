@@ -33,6 +33,47 @@ const parseDate = (dateStr) => {
   return null;
 };
 
+const updateUploadedFileProgress = async (fileId, inserted) => {
+  const parsedFileId = toInt(fileId);
+  if (!parsedFileId || !Number.isFinite(inserted) || inserted <= 0) return;
+
+  await pool.query(
+    `UPDATE uploaded_files
+     SET parse_status = 'completed',
+         record_count = COALESCE(record_count, 0) + $2
+     WHERE id = $1`,
+    [parsedFileId, inserted]
+  );
+};
+
+const normalizeRawData = (value) => (value && typeof value === 'object' && !Array.isArray(value) ? value : {});
+
+const buildCdrResponseRow = (row) => {
+  const raw = normalizeRawData(row.raw_data);
+  return {
+    ...raw,
+    ...row,
+    a_party: row.calling_number || raw.a_party || '',
+    b_party: row.called_number || raw.b_party || '',
+    call_start_time: row.call_time || raw.call_start_time || raw.call_time || null,
+    duration_sec: row.duration_sec ?? row.duration ?? raw.duration_sec ?? 0,
+    imei: row.imei_a || raw.imei || raw.imei_a || null,
+    imsi: raw.imsi || null,
+    first_cell_id: row.first_cell_id || raw.first_cell_id || raw.cell_id_a || null,
+    last_cell_id: row.last_cell_id || raw.last_cell_id || raw.cell_id_b || null,
+    first_cell_desc: raw.first_cell_desc || raw.first_cell_address || null,
+    last_cell_desc: raw.last_cell_desc || raw.last_cell_address || null,
+    first_cell_lat: row.lat ?? raw.first_cell_lat ?? null,
+    first_cell_long: row.long ?? raw.first_cell_long ?? null,
+    last_cell_lat: raw.last_cell_lat ?? row.lat ?? null,
+    last_cell_long: raw.last_cell_long ?? row.long ?? null,
+    roaming_circle: row.roaming || raw.roaming_circle || null,
+    service_type: raw.service_type || null,
+    smsc_number: raw.smsc_number || null,
+    operator: row.operator || raw.operator || null,
+  };
+};
+
 /* GET /api/cdr/records?caseId=...
    Returns columns aliased for backward compat with frontend analysis components */
 router.get('/records', authenticateToken, async (req, res) => {
@@ -44,7 +85,7 @@ router.get('/records', authenticateToken, async (req, res) => {
        FROM cdr_records WHERE case_id = $1 ORDER BY created_at DESC, id DESC`,
       [caseId]
     );
-    res.json(result.rows);
+    res.json(result.rows.map(buildCdrResponseRow));
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -98,11 +139,14 @@ router.post('/records', authenticateToken, async (req, res) => {
       const placeholders = batch.map((record, index) => {
         const durationSec = record.duration_sec || record.duration ? parseInt(String(record.duration_sec || record.duration), 10) || 0 : 0;
         const recordFileId = record.file_id || fileId || null;
+        const rawData = record.raw_data && typeof record.raw_data === 'object' ? record.raw_data : record;
+        const latitude = record.lat != null ? parseFloat(record.lat) : (record.first_cell_lat != null ? parseFloat(record.first_cell_lat) : null);
+        const longitude = record.long != null ? parseFloat(record.long) : (record.first_cell_long != null ? parseFloat(record.first_cell_long) : null);
         values.push(
           parsedCaseId, recordFileId,
           record.calling_number || record.a_party || '',
           record.called_number || record.b_party || null,
-          record.call_type || null, record.call_time || record.toc || null,
+          record.call_type || null, record.call_time || record.call_start_time || record.toc || null,
           parseDate(record.call_date), durationSec,
           record.first_cell_id || null, record.last_cell_id || null,
           record.imei_a || record.imei || null,
@@ -110,11 +154,12 @@ router.post('/records', authenticateToken, async (req, res) => {
           record.cell_id_a || null, record.cell_id_b || null,
           record.roaming || null,
           record.operator || 'UNKNOWN',
-          record.lat != null ? parseFloat(record.lat) : null,
-          record.long != null ? parseFloat(record.long) : null
+          latitude,
+          longitude,
+          JSON.stringify(rawData || {})
         );
-        const offset = index * 18;
-        return `(${Array.from({ length: 18 }, (_, j) => `$${offset + j + 1}`).join(', ')})`;
+        const offset = index * 19;
+        return `(${Array.from({ length: 19 }, (_, j) => `$${offset + j + 1}`).join(', ')})`;
       }).join(', ');
 
       await pool.query(
@@ -122,12 +167,13 @@ router.post('/records', authenticateToken, async (req, res) => {
            case_id, file_id, calling_number, called_number,
            call_type, call_time, call_date, duration_sec,
            first_cell_id, last_cell_id, imei_a, imei_b,
-           cell_id_a, cell_id_b, roaming, operator, lat, long
+           cell_id_a, cell_id_b, roaming, operator, lat, long, raw_data
          ) VALUES ${placeholders}`,
         values
       );
       inserted += batch.length;
     }
+    await updateUploadedFileProgress(fileId, inserted);
     res.json({ inserted });
   } catch (error) {
     res.status(500).json({ error: error.message });
