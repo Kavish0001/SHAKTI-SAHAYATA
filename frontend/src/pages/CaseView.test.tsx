@@ -4,6 +4,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import CaseView from './CaseView'
 
 const getCaseMock = vi.fn()
+const archiveCaseMock = vi.fn()
+const removeCaseMock = vi.fn()
 const listFilesMock = vi.fn()
 const getRecordCountMock = vi.fn()
 const removeFileMock = vi.fn()
@@ -16,6 +18,8 @@ vi.mock('../components/lib/apis', () => ({
   caseAPI: {
     get: (...args: unknown[]) => getCaseMock(...args),
     getTimeline: vi.fn(),
+    archive: (...args: unknown[]) => archiveCaseMock(...args),
+    remove: (...args: unknown[]) => removeCaseMock(...args),
   },
   fileAPI: {
     listByCase: (...args: unknown[]) => listFilesMock(...args),
@@ -67,6 +71,8 @@ vi.mock('../components/analysis/ILDAnalysis', () => ({
 describe('CaseView', () => {
   beforeEach(() => {
     getCaseMock.mockReset()
+    archiveCaseMock.mockReset()
+    removeCaseMock.mockReset()
     listFilesMock.mockReset()
     getRecordCountMock.mockReset()
     removeFileMock.mockReset()
@@ -87,6 +93,8 @@ describe('CaseView', () => {
       start_date: '2026-04-01',
       end_date: '2026-04-08',
       is_evidence_locked: false,
+      canArchive: true,
+      canDelete: true,
       file_count: 4,
       created_at: '2026-04-08T00:00:00.000Z',
       created_by_name: 'Inspector Rao',
@@ -100,6 +108,9 @@ describe('CaseView', () => {
     getRecordCountMock.mockResolvedValue(12)
     removeFileMock.mockResolvedValue({ fileId: 1, deleted: true, deletedRecords: 125, deletedType: 'cdr' })
     ingestCaseUploadsMock.mockResolvedValue([])
+    archiveCaseMock.mockResolvedValue({ message: 'Case archived' })
+    removeCaseMock.mockResolvedValue({ message: 'Case deleted' })
+    vi.stubGlobal('confirm', vi.fn(() => true))
   })
 
   const renderAt = (initialEntry: string) =>
@@ -108,6 +119,7 @@ describe('CaseView', () => {
         <Routes>
           <Route path="/case/:id" element={<CaseView />} />
           <Route path="/case/:id/:dataType" element={<CaseView />} />
+          <Route path="/dashboard" element={<div>Dashboard Route</div>} />
         </Routes>
       </MemoryRouter>
     )
@@ -154,5 +166,67 @@ describe('CaseView', () => {
     expect(screen.getByText('ipdr-b.csv')).toBeInTheDocument()
     expect(screen.queryByText('cdr-main.csv')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: /upload ipdr/i })).toBeInTheDocument()
+  })
+
+  it('archives a case from the overview header and refreshes the status badge', async () => {
+    getCaseMock
+      .mockResolvedValueOnce({
+        id: 42,
+        case_name: 'Analysis Only Case',
+        case_number: 'CASE-42',
+        case_type: 'telecom',
+        fir_number: 'FIR-42',
+        status: 'active',
+        priority: 'high',
+        operator: 'Jio',
+        investigation_details: 'Focused case',
+        start_date: '2026-04-01',
+        end_date: '2026-04-08',
+        is_evidence_locked: false,
+        canArchive: true,
+        canDelete: true,
+        file_count: 4,
+        created_at: '2026-04-08T00:00:00.000Z',
+        created_by_name: 'Inspector Rao',
+      })
+      .mockResolvedValueOnce({
+        id: 42,
+        case_name: 'Analysis Only Case',
+        case_number: 'CASE-42',
+        case_type: 'telecom',
+        fir_number: 'FIR-42',
+        status: 'archived',
+        priority: 'high',
+        operator: 'Jio',
+        investigation_details: 'Focused case',
+        start_date: '2026-04-01',
+        end_date: '2026-04-08',
+        is_evidence_locked: false,
+        canArchive: true,
+        canDelete: true,
+        file_count: 4,
+        created_at: '2026-04-08T00:00:00.000Z',
+        created_by_name: 'Inspector Rao',
+      })
+
+    renderAt('/case/42')
+
+    fireEvent.click(await screen.findByRole('button', { name: /close case/i }))
+
+    await waitFor(() => {
+      expect(archiveCaseMock).toHaveBeenCalledWith('42')
+      expect(screen.getByText(/archived/i)).toBeInTheDocument()
+    })
+  })
+
+  it('deletes a case from the overview header and redirects to the dashboard', async () => {
+    renderAt('/case/42')
+
+    fireEvent.click(await screen.findByRole('button', { name: /delete case/i }))
+
+    await waitFor(() => {
+      expect(removeCaseMock).toHaveBeenCalledWith('42')
+      expect(screen.getByText('Dashboard Route')).toBeInTheDocument()
+    })
   })
 })

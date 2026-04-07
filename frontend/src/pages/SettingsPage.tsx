@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react'
-import { Plus, Save, Settings2, ShieldCheck, SlidersHorizontal, Trash2, Wrench } from 'lucide-react'
+import { ArchiveRestore, FolderArchive, Plus, Save, Settings2, ShieldCheck, SlidersHorizontal, Trash2, Wrench } from 'lucide-react'
 import { toast } from 'sonner'
-import { settingsAPI } from '../components/lib/apis'
+import { caseAPI, settingsAPI } from '../components/lib/apis'
 import SystemDiagnosticsPanel from '../components/settings/SystemDiagnosticsPanel'
 import type { CustomOSINTProviderConfig } from '../lib/osintApi'
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
@@ -44,6 +44,18 @@ interface Config {
   osint: {
     providers: CustomOSINTProviderConfig[]
   }
+}
+
+interface ArchivedCase {
+  id: number
+  case_name: string
+  case_number: string
+  operator?: string | null
+  priority?: string | null
+  updated_at?: string | null
+  is_evidence_locked?: boolean | null
+  canArchive?: boolean
+  canDelete?: boolean
 }
 
 const createProvider = (): CustomOSINTProviderConfig => ({
@@ -149,7 +161,7 @@ function SettingSwitch({
   onCheckedChange: (checked: boolean) => void
 }) {
   return (
-    <div className="flex items-start justify-between gap-4 rounded-[1.25rem] border border-border/70 bg-background/60 p-4">
+    <div className="flex items-start justify-between gap-4 rounded-[1.25rem] border border-border/70 bg-card/60 p-4">
       <div className="space-y-1">
         <Label htmlFor={id} className="text-sm font-medium">{label}</Label>
         <p className="text-sm text-muted-foreground">{description}</p>
@@ -163,6 +175,12 @@ export const Settings: React.FC = () => {
   const [config, setConfig] = useState<Config>(defaultConfig)
   const [status, setStatus] = useState<string>('')
   const [saving, setSaving] = useState(false)
+  const [archivedCases, setArchivedCases] = useState<ArchivedCase[]>([])
+  const [archiveLoading, setArchiveLoading] = useState(true)
+  const [archiveAction, setArchiveAction] = useState<{ caseId: number | null; type: 'reopen' | 'delete' | null }>({
+    caseId: null,
+    type: null,
+  })
 
   useEffect(() => {
     ;(async () => {
@@ -174,7 +192,23 @@ export const Settings: React.FC = () => {
         setStatus(`Failed to load settings: ${message}`)
       }
     })()
+
+    void loadArchivedCases()
   }, [])
+
+  const loadArchivedCases = async () => {
+    try {
+      setArchiveLoading(true)
+      const response = await caseAPI.list({ status: 'archived', limit: 100 })
+      setArchivedCases(response.items || [])
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error)
+      toast.error(`Failed to load archived cases: ${message}`)
+      setArchivedCases([])
+    } finally {
+      setArchiveLoading(false)
+    }
+  }
 
   const save = async () => {
     try {
@@ -236,10 +270,48 @@ export const Settings: React.FC = () => {
     }))
   }
 
+  const handleReopenCase = async (archivedCase: ArchivedCase) => {
+    if (!archivedCase.canArchive || archivedCase.is_evidence_locked) return
+
+    const confirmed = window.confirm(`Open ${archivedCase.case_name} again and move it back into active cases?`)
+    if (!confirmed) return
+
+    try {
+      setArchiveAction({ caseId: archivedCase.id, type: 'reopen' })
+      await caseAPI.reopen(String(archivedCase.id))
+      toast.success(`${archivedCase.case_name} is active again.`)
+      await loadArchivedCases()
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error)
+      toast.error(message)
+    } finally {
+      setArchiveAction({ caseId: null, type: null })
+    }
+  }
+
+  const handleDeleteArchivedCase = async (archivedCase: ArchivedCase) => {
+    if (!archivedCase.canDelete || archivedCase.is_evidence_locked) return
+
+    const confirmed = window.confirm(`Delete ${archivedCase.case_name} permanently from archive?`)
+    if (!confirmed) return
+
+    try {
+      setArchiveAction({ caseId: archivedCase.id, type: 'delete' })
+      await caseAPI.remove(String(archivedCase.id))
+      toast.success(`${archivedCase.case_name} was deleted from archive.`)
+      await loadArchivedCases()
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error)
+      toast.error(message)
+    } finally {
+      setArchiveAction({ caseId: null, type: null })
+    }
+  }
+
   return (
     <div className="space-y-6">
       <Card className="overflow-hidden rounded-[2rem] border-border/70 shadow-[0_24px_70px_rgba(10,19,51,0.12)]">
-        <CardHeader className="border-b border-border/70 bg-gradient-to-r from-shakti-500/5 via-blue-500/5 to-transparent pb-6">
+        <CardHeader className="border-b border-border/70 bg-transparent pb-6">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div className="space-y-3">
               <Badge className="w-fit rounded-full border border-shakti-300/25 bg-shakti-50 text-shakti-700 dark:border-shakti-400/20 dark:bg-shakti-500/10 dark:text-shakti-200">
@@ -476,7 +548,7 @@ export const Settings: React.FC = () => {
 
                 <div className="space-y-4">
                   {config.osint.providers.map((provider, index) => (
-                    <Card key={provider.id} className="rounded-[1.25rem] border-border/70 bg-background/60">
+                    <Card key={provider.id} className="rounded-[1.25rem] border-border/70 bg-card/60">
                       <CardContent className="space-y-4 p-4">
                         <div className="flex items-center justify-between gap-3">
                           <div>
@@ -583,6 +655,87 @@ export const Settings: React.FC = () => {
               </CardContent>
             </Card>
           </div>
+
+          <Card className="rounded-[1.5rem] border-border/70">
+            <CardHeader className="pb-4">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-amber-500/10 text-amber-700 dark:text-amber-300">
+                  <FolderArchive className="h-5 w-5" />
+                </div>
+                <div>
+                  <CardTitle className="text-xl">Archived Cases</CardTitle>
+                  <CardDescription>Review archived cases here and either open them again or delete them permanently.</CardDescription>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {archiveLoading ? (
+                <div className="rounded-[1.25rem] border border-border/70 bg-card/60 px-4 py-6 text-sm text-muted-foreground">
+                  Loading archived cases...
+                </div>
+              ) : archivedCases.length === 0 ? (
+                <Alert className="rounded-[1.25rem]">
+                  <FolderArchive className="h-4 w-4" />
+                  <AlertTitle>No archived cases</AlertTitle>
+                  <AlertDescription>
+                    Archived cases will appear here once a case is closed and moved to archive.
+                  </AlertDescription>
+                </Alert>
+              ) : (
+                <div className="space-y-3">
+                  {archivedCases.map((archivedCase) => (
+                    <Card key={archivedCase.id} className="rounded-[1.25rem] border-border/70 bg-card/60">
+                      <CardContent className="flex flex-col gap-4 p-4 lg:flex-row lg:items-center lg:justify-between">
+                        <div className="space-y-1">
+                          <div className="text-base font-semibold">{archivedCase.case_name}</div>
+                          <div className="text-sm text-muted-foreground">
+                            {archivedCase.case_number}
+                            {archivedCase.operator ? ` • ${archivedCase.operator}` : ''}
+                            {archivedCase.updated_at ? ` • Updated ${new Date(archivedCase.updated_at).toLocaleDateString()}` : ''}
+                          </div>
+                          <div className="flex flex-wrap gap-2 pt-1">
+                            <Badge className="status-archived rounded-full">archived</Badge>
+                            <Badge variant="secondary" className="rounded-full capitalize">{archivedCase.priority || 'normal'}</Badge>
+                            {archivedCase.is_evidence_locked ? <Badge className="status-locked rounded-full">Evidence Locked</Badge> : null}
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-3">
+                          {archivedCase.canArchive ? (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="rounded-2xl border-emerald-300/60 bg-emerald-50/80 text-emerald-700 hover:bg-emerald-100/90 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200 dark:hover:bg-emerald-500/20"
+                              onClick={() => void handleReopenCase(archivedCase)}
+                              disabled={archiveAction.caseId === archivedCase.id || Boolean(archivedCase.is_evidence_locked)}
+                              title={archivedCase.is_evidence_locked ? 'Evidence lock prevents opening this case again.' : 'Move this case back to active cases'}
+                            >
+                              <ArchiveRestore className="h-4 w-4" />
+                              {archiveAction.caseId === archivedCase.id && archiveAction.type === 'reopen' ? 'Opening...' : 'Open Again'}
+                            </Button>
+                          ) : null}
+
+                          {archivedCase.canDelete ? (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              className="rounded-2xl border-red-300/60 bg-red-50/80 text-red-700 hover:bg-red-100/90 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200 dark:hover:bg-red-500/20"
+                              onClick={() => void handleDeleteArchivedCase(archivedCase)}
+                              disabled={archiveAction.caseId === archivedCase.id || Boolean(archivedCase.is_evidence_locked)}
+                              title={archivedCase.is_evidence_locked ? 'Evidence lock prevents deleting this case.' : 'Delete this archived case permanently'}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                              {archiveAction.caseId === archivedCase.id && archiveAction.type === 'delete' ? 'Deleting...' : 'Delete'}
+                            </Button>
+                          ) : null}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
         </CardContent>
       </Card>
     </div>

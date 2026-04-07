@@ -4,6 +4,7 @@ import { caseAPI, fileAPI, recordCountAPI } from '../components/lib/apis';
 import { ingestCaseUploads, type CaseUploadSlotKey } from '../lib/caseFileIngestion';
 import { useCaseContextStore } from '../stores/caseContextStore';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -54,6 +55,8 @@ interface CaseData {
   file_count: number;
   created_at: string;
   created_by_name: string;
+  canArchive?: boolean;
+  canDelete?: boolean;
 }
 
 interface TimelineEvent {
@@ -122,6 +125,7 @@ export default function CaseView() {
   const [timelineLoading, setTimelineLoading] = useState(false);
   const [{ uploadingTab, deletingFileId }, setFileActionState] = useState(EMPTY_FILE_ACTION_STATE);
   const [fileActionMessage, setFileActionMessage] = useState('');
+  const [caseActionState, setCaseActionState] = useState<'archive' | 'delete' | null>(null);
   const setActiveCase = useCaseContextStore((state) => state.setActiveCase);
   const fileInputRefs = useRef<Record<FileTabKey, HTMLInputElement | null>>({
     cdr: null,
@@ -326,6 +330,82 @@ export default function CaseView() {
     } finally {
       setFileActionState(EMPTY_FILE_ACTION_STATE);
     }
+  };
+
+  const handleArchiveCase = async () => {
+    if (!caseData || !caseData.canArchive || caseData.is_evidence_locked || caseData.status === 'archived') return;
+
+    const confirmed = window.confirm(`Archive ${caseData.case_name} and move it out of the active investigation workspace?`);
+    if (!confirmed) return;
+
+    setCaseActionState('archive');
+
+    try {
+      await caseAPI.archive(String(caseData.id));
+      await refreshCaseWorkspace();
+      toast.success(`${caseData.case_name} was moved to archive.`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to archive case';
+      toast.error(message);
+    } finally {
+      setCaseActionState(null);
+    }
+  };
+
+  const handleDeleteCase = async () => {
+    if (!caseData || !caseData.canDelete || caseData.is_evidence_locked) return;
+
+    const confirmed = window.confirm(`Delete ${caseData.case_name} permanently? This will remove the case and its linked workspace data.`);
+    if (!confirmed) return;
+
+    setCaseActionState('delete');
+
+    try {
+      await caseAPI.remove(String(caseData.id));
+      toast.success(`${caseData.case_name} was deleted.`);
+      navigate('/dashboard');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to delete case';
+      toast.error(message);
+    } finally {
+      setCaseActionState(null);
+    }
+  };
+
+  const renderCaseLifecycleActions = (compact = false) => {
+    if (!caseData || (!caseData.canArchive && !caseData.canDelete)) return null;
+
+    const sharedClassName = compact ? 'h-8 rounded-full px-3 text-xs font-semibold' : 'h-9 rounded-full px-4 text-sm font-semibold';
+    const disabledByLock = Boolean(caseData.is_evidence_locked);
+
+    return (
+      <>
+        {caseData.canArchive && caseData.status !== 'archived' ? (
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => void handleArchiveCase()}
+            disabled={caseActionState !== null || disabledByLock}
+            title={disabledByLock ? 'Evidence lock prevents case archival.' : 'Move this case to archive'}
+            className={`${sharedClassName} border-amber-300/70 bg-amber-50/85 text-amber-700 hover:bg-amber-100/90 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200 dark:hover:bg-amber-500/20`}
+          >
+            {caseActionState === 'archive' ? 'Closing...' : 'Close Case'}
+          </Button>
+        ) : null}
+        {caseData.canDelete ? (
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => void handleDeleteCase()}
+            disabled={caseActionState !== null || disabledByLock}
+            title={disabledByLock ? 'Evidence lock prevents case deletion.' : 'Delete this case permanently'}
+            className={`${sharedClassName} border-red-300/70 bg-red-50/85 text-red-700 hover:bg-red-100/90 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200 dark:hover:bg-red-500/20`}
+          >
+            {caseActionState === 'delete' ? 'Deleting...' : 'Delete Case'}
+          </Button>
+        ) : null}
+      </>
+    );
   };
 
   /** Render the selected data type's analysis component */
@@ -709,9 +789,11 @@ export default function CaseView() {
               </Breadcrumb>
               <h1 className="case-title">{caseData.case_name}</h1>
             </div>
-            <div className="case-header-badges">
+            <div className="case-header-badges flex flex-wrap items-center justify-end gap-2">
               <Badge className={`${getStatusClass(caseData.status)} rounded-full`}>{caseData.status}</Badge>
+              <Badge className={`${getPriorityClass(caseData.priority)} rounded-full`}>{caseData.priority}</Badge>
               {caseData.is_evidence_locked && <Badge className="status-locked rounded-full">Locked</Badge>}
+              {renderCaseLifecycleActions(true)}
             </div>
           </div>
         </div>
@@ -740,10 +822,11 @@ export default function CaseView() {
         </Breadcrumb>
         <div className="case-header-top">
           <button className="btn-back" onClick={() => navigate('/dashboard')}>← Back</button>
-          <div className="case-header-badges">
+          <div className="case-header-badges flex flex-wrap items-center justify-end gap-2">
             <Badge className={`${getStatusClass(caseData.status)} rounded-full`}>{caseData.status}</Badge>
             <Badge className={`${getPriorityClass(caseData.priority)} rounded-full`}>{caseData.priority}</Badge>
             {caseData.is_evidence_locked && <Badge className="status-locked rounded-full">Evidence Locked</Badge>}
+            {renderCaseLifecycleActions()}
           </div>
         </div>
         <h1 className="case-title">{caseData.case_name}</h1>

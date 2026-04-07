@@ -35,7 +35,7 @@ const TABS: TabDef[] = [
 ]
 
 const DataRow: React.FC<{ label: string; value: React.ReactNode }> = ({ label, value }) => (
-  <div className="grid gap-2 rounded-[1rem] border border-border/70 bg-background/60 px-4 py-3 sm:grid-cols-[180px_1fr] sm:items-start">
+  <div className="grid gap-2 rounded-[1rem] border border-border/70 bg-card/60 px-4 py-3 sm:grid-cols-[180px_1fr] sm:items-start">
     <span className="text-sm font-medium capitalize text-muted-foreground">{label}</span>
     <span className="text-sm font-semibold break-words">{String(value ?? '—')}</span>
   </div>
@@ -213,7 +213,7 @@ export const OSINTTools: React.FC = () => {
   return (
     <div className="space-y-6">
       <Card className="overflow-hidden rounded-[2rem] border-border/70 shadow-[0_24px_70px_rgba(10,19,51,0.12)]">
-        <CardHeader className="border-b border-border/70 bg-gradient-to-r from-shakti-500/5 via-blue-500/5 to-transparent pb-6">
+        <CardHeader className="border-b border-border/70 bg-transparent pb-6">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div className="space-y-3">
               <Badge className="w-fit rounded-full border border-shakti-300/25 bg-shakti-50 text-shakti-700 dark:border-shakti-400/20 dark:bg-shakti-500/10 dark:text-shakti-200">

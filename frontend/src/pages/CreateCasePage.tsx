@@ -18,6 +18,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
+import { cn } from '@/lib/utils'
 import { ingestCaseUploads, type CaseUploadFailure, type CaseUploadSlotKey } from '../lib/caseFileIngestion'
 
 const loadingStates = [
@@ -39,6 +40,19 @@ interface UploadSlot {
   color: string
   files: File[]
 }
+
+type FormField =
+  | 'caseName'
+  | 'caseNumber'
+  | 'operator'
+  | 'caseType'
+  | 'priority'
+  | 'firNumber'
+  | 'investigationDetails'
+  | 'startDate'
+  | 'endDate'
+
+type FormErrors = Partial<Record<FormField, string>>
 
 const INITIAL_UPLOADS: UploadSlot[] = [
   { key: 'cdr', label: 'Upload CDR', icon: '📞', desc: 'Call Detail Records', color: 'from-blue-500 to-blue-600', files: [] },
@@ -76,18 +90,59 @@ export default function CreateCasePage() {
   const [uploads, setUploads] = useState<UploadSlot[]>(INITIAL_UPLOADS.map((upload) => ({ ...upload, files: [] })))
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [fieldErrors, setFieldErrors] = useState<FormErrors>({})
   const [uploadProgress, setUploadProgress] = useState<Record<string, string>>({})
 
   const fileInputRefs = useRef<Record<string, HTMLInputElement | null>>({})
 
   const handleNameChange = useCallback((value: string) => {
     setCaseName(value)
+    setFieldErrors((prev) => {
+      const next = { ...prev }
+      delete next.caseName
+      delete next.caseNumber
+      return next
+    })
     if (value.trim().length >= 2) {
       setCaseNumber(generateCaseNumber(value))
     } else {
       setCaseNumber('')
     }
   }, [])
+
+  const clearFieldError = useCallback((field: FormField) => {
+    setFieldErrors((prev) => {
+      if (!prev[field]) return prev
+      const next = { ...prev }
+      delete next[field]
+      return next
+    })
+  }, [])
+
+  const validateForm = useCallback((): FormErrors => {
+    const nextErrors: FormErrors = {}
+
+    if (!caseName.trim()) nextErrors.caseName = 'Case name is required.'
+    if (!caseNumber.trim()) nextErrors.caseNumber = 'Case number could not be generated.'
+    if (!operator.trim()) nextErrors.operator = 'Select a telecom operator.'
+    if (!caseType.trim()) nextErrors.caseType = 'Select a case type.'
+    if (!priority.trim()) nextErrors.priority = 'Select a priority.'
+    if (!firNumber.trim()) nextErrors.firNumber = 'FIR number is required.'
+    if (!investigationDetails.trim()) nextErrors.investigationDetails = 'Investigation details are required.'
+    if (!startDate) nextErrors.startDate = 'Start date is required.'
+    if (!endDate) nextErrors.endDate = 'End date is required.'
+    if (startDate && endDate && new Date(endDate) < new Date(startDate)) {
+      nextErrors.endDate = 'End date cannot be earlier than start date.'
+    }
+
+    return nextErrors
+  }, [caseName, caseNumber, operator, caseType, priority, firNumber, investigationDetails, startDate, endDate])
+
+  const getFieldClassName = (field: FormField, baseClassName: string) =>
+    cn(
+      baseClassName,
+      fieldErrors[field] && 'border-red-500 focus-visible:ring-red-500 dark:border-red-500'
+    )
 
   const handleFileSelect = (key: string, newFiles: FileList | null) => {
     if (!newFiles || newFiles.length === 0) return
@@ -131,26 +186,29 @@ export default function CreateCasePage() {
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault()
 
-    if (!caseName.trim()) {
-      setError('Case name is required')
+    const nextErrors = validateForm()
+    if (Object.keys(nextErrors).length > 0) {
+      setFieldErrors(nextErrors)
+      setError('Complete all required case details before creating the case.')
       return
     }
 
     setLoading(true)
     setError('')
+    setFieldErrors({})
     setUploadProgress({})
 
     try {
       const newCase = await caseAPI.create({
         caseName,
-        caseNumber: caseNumber || undefined,
+        caseNumber,
         operator,
         caseType,
         priority,
         firNumber,
         investigationDetails,
-        startDate: startDate || undefined,
-        endDate: endDate || undefined,
+        startDate,
+        endDate,
       })
       const caseId = newCase.id || newCase.case?.id
 
@@ -193,7 +251,7 @@ export default function CreateCasePage() {
         </div>
 
         <Card className="overflow-hidden rounded-[2rem] border-border/70 shadow-[0_24px_70px_rgba(10,19,51,0.12)]">
-          <CardHeader className="border-b border-border/70 bg-gradient-to-r from-shakti-500/5 via-blue-500/5 to-transparent pb-6">
+          <CardHeader className="border-b border-border/70 bg-transparent pb-6">
             <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
               <div className="space-y-3">
                 <Badge className="w-fit rounded-full border border-shakti-300/25 bg-shakti-50 text-shakti-700 dark:border-shakti-400/20 dark:bg-shakti-500/10 dark:text-shakti-200">
@@ -212,7 +270,7 @@ export default function CreateCasePage() {
                 </div>
               </div>
 
-              <div className="grid gap-3 rounded-[1.5rem] border border-border/70 bg-background/70 p-4 text-sm sm:min-w-[240px]">
+              <div className="grid gap-3 rounded-[1.5rem] border border-border/70 bg-card/70 p-4 text-sm sm:min-w-[240px]">
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-muted-foreground">Selected uploads</span>
                   <Badge variant="secondary" className="rounded-full">{getTotalFileCount()}</Badge>
@@ -248,33 +306,38 @@ export default function CreateCasePage() {
                   <CardContent className="grid gap-5">
                     <div className="grid gap-5 sm:grid-cols-2">
                       <div className="space-y-2">
-                        <Label htmlFor="case-name">Case Name</Label>
+                        <Label htmlFor="case-name">Case Name *</Label>
                         <Input
                           id="case-name"
                           value={caseName}
                           onChange={(event) => handleNameChange(event.target.value)}
                           placeholder="e.g. Mumbai Cyber Fraud 2026"
-                          className="h-11 rounded-xl"
+                          className={getFieldClassName('caseName', 'h-11 rounded-xl')}
                           required
                         />
+                        {fieldErrors.caseName ? <p className="text-sm text-red-600 dark:text-red-400">{fieldErrors.caseName}</p> : null}
                       </div>
                       <div className="space-y-2">
-                        <Label htmlFor="case-number">Case Number</Label>
+                        <Label htmlFor="case-number">Case Number *</Label>
                         <Input
                           id="case-number"
                           value={caseNumber}
                           readOnly
                           placeholder="Auto-generated from case name"
-                          className="h-11 rounded-xl bg-muted/60 text-muted-foreground"
+                          className={getFieldClassName('caseNumber', 'h-11 rounded-xl bg-muted/60 text-muted-foreground')}
                         />
+                        {fieldErrors.caseNumber ? <p className="text-sm text-red-600 dark:text-red-400">{fieldErrors.caseNumber}</p> : null}
                       </div>
                     </div>
 
                     <div className="grid gap-5 sm:grid-cols-3">
                       <div className="space-y-2">
-                        <Label htmlFor="operator-select">Telecom Operator</Label>
-                        <Select value={operator} onValueChange={setOperator}>
-                          <SelectTrigger id="operator-select" className="h-11 w-full rounded-xl">
+                        <Label htmlFor="operator-select">Telecom Operator *</Label>
+                        <Select value={operator} onValueChange={(value: string) => {
+                          setOperator(value)
+                          clearFieldError('operator')
+                        }}>
+                          <SelectTrigger id="operator-select" className={getFieldClassName('operator', 'h-11 w-full rounded-xl')}>
                             <SelectValue placeholder="Select operator" />
                           </SelectTrigger>
                           <SelectContent>
@@ -283,12 +346,16 @@ export default function CreateCasePage() {
                             ))}
                           </SelectContent>
                         </Select>
+                        {fieldErrors.operator ? <p className="text-sm text-red-600 dark:text-red-400">{fieldErrors.operator}</p> : null}
                       </div>
 
                       <div className="space-y-2">
-                        <Label htmlFor="case-type-select">Case Type</Label>
-                        <Select value={caseType} onValueChange={setCaseType}>
-                          <SelectTrigger id="case-type-select" className="h-11 w-full rounded-xl">
+                        <Label htmlFor="case-type-select">Case Type *</Label>
+                        <Select value={caseType} onValueChange={(value: string) => {
+                          setCaseType(value)
+                          clearFieldError('caseType')
+                        }}>
+                          <SelectTrigger id="case-type-select" className={getFieldClassName('caseType', 'h-11 w-full rounded-xl')}>
                             <SelectValue placeholder="Select type" />
                           </SelectTrigger>
                           <SelectContent>
@@ -297,12 +364,16 @@ export default function CreateCasePage() {
                             ))}
                           </SelectContent>
                         </Select>
+                        {fieldErrors.caseType ? <p className="text-sm text-red-600 dark:text-red-400">{fieldErrors.caseType}</p> : null}
                       </div>
 
                       <div className="space-y-2">
-                        <Label htmlFor="priority-select">Priority</Label>
-                        <Select value={priority} onValueChange={setPriority}>
-                          <SelectTrigger id="priority-select" className="h-11 w-full rounded-xl">
+                        <Label htmlFor="priority-select">Priority *</Label>
+                        <Select value={priority} onValueChange={(value: string) => {
+                          setPriority(value)
+                          clearFieldError('priority')
+                        }}>
+                          <SelectTrigger id="priority-select" className={getFieldClassName('priority', 'h-11 w-full rounded-xl')}>
                             <SelectValue placeholder="Select priority" />
                           </SelectTrigger>
                           <SelectContent>
@@ -312,29 +383,38 @@ export default function CreateCasePage() {
                             <SelectItem value="critical">Critical</SelectItem>
                           </SelectContent>
                         </Select>
+                        {fieldErrors.priority ? <p className="text-sm text-red-600 dark:text-red-400">{fieldErrors.priority}</p> : null}
                       </div>
                     </div>
 
                     <div className="space-y-2">
-                      <Label htmlFor="fir-number">FIR Number</Label>
+                      <Label htmlFor="fir-number">FIR Number *</Label>
                       <Input
                         id="fir-number"
                         value={firNumber}
-                        onChange={(event) => setFirNumber(event.target.value)}
+                        onChange={(event) => {
+                          setFirNumber(event.target.value)
+                          clearFieldError('firNumber')
+                        }}
                         placeholder="e.g. FIR/2026/0042"
-                        className="h-11 rounded-xl"
+                        className={getFieldClassName('firNumber', 'h-11 rounded-xl')}
                       />
+                      {fieldErrors.firNumber ? <p className="text-sm text-red-600 dark:text-red-400">{fieldErrors.firNumber}</p> : null}
                     </div>
 
                     <div className="space-y-2">
-                      <Label htmlFor="investigation-details">Investigation Details</Label>
+                      <Label htmlFor="investigation-details">Investigation Details *</Label>
                       <Textarea
                         id="investigation-details"
                         value={investigationDetails}
-                        onChange={(event) => setInvestigationDetails(event.target.value)}
+                        onChange={(event) => {
+                          setInvestigationDetails(event.target.value)
+                          clearFieldError('investigationDetails')
+                        }}
                         placeholder="Describe the investigation context, suspects, objectives, and notes..."
-                        className="min-h-32 rounded-[1.25rem]"
+                        className={getFieldClassName('investigationDetails', 'min-h-32 rounded-[1.25rem]')}
                       />
+                      {fieldErrors.investigationDetails ? <p className="text-sm text-red-600 dark:text-red-400">{fieldErrors.investigationDetails}</p> : null}
                     </div>
                   </CardContent>
                 </Card>
@@ -346,31 +426,40 @@ export default function CreateCasePage() {
                   </CardHeader>
                   <CardContent className="grid gap-5">
                     <div className="space-y-2">
-                      <Label htmlFor="start-date">Start Date</Label>
+                      <Label htmlFor="start-date">Start Date *</Label>
                       <div className="relative">
                         <CalendarRange className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                         <Input
                           id="start-date"
                           type="date"
                           value={startDate}
-                          onChange={(event) => setStartDate(event.target.value)}
-                          className="h-11 rounded-xl pl-10"
+                          onChange={(event) => {
+                            setStartDate(event.target.value)
+                            clearFieldError('startDate')
+                            clearFieldError('endDate')
+                          }}
+                          className={getFieldClassName('startDate', 'h-11 rounded-xl pl-10')}
                         />
                       </div>
+                      {fieldErrors.startDate ? <p className="text-sm text-red-600 dark:text-red-400">{fieldErrors.startDate}</p> : null}
                     </div>
 
                     <div className="space-y-2">
-                      <Label htmlFor="end-date">End Date</Label>
+                      <Label htmlFor="end-date">End Date *</Label>
                       <div className="relative">
                         <CalendarRange className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                         <Input
                           id="end-date"
                           type="date"
                           value={endDate}
-                          onChange={(event) => setEndDate(event.target.value)}
-                          className="h-11 rounded-xl pl-10"
+                          onChange={(event) => {
+                            setEndDate(event.target.value)
+                            clearFieldError('endDate')
+                          }}
+                          className={getFieldClassName('endDate', 'h-11 rounded-xl pl-10')}
                         />
                       </div>
+                      {fieldErrors.endDate ? <p className="text-sm text-red-600 dark:text-red-400">{fieldErrors.endDate}</p> : null}
                     </div>
 
                     <div className="rounded-[1.25rem] border border-border/70 bg-muted/40 p-4 text-sm text-muted-foreground">

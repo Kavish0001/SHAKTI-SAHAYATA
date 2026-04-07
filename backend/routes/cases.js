@@ -26,6 +26,8 @@ function generateCaseNumber(caseName) {
   return `${prefix || 'CSE'}-${year}-${random}`;
 }
 
+const isBlank = (value) => String(value ?? '').trim() === '';
+
 /* ── GET /api/cases — list officer's cases ── */
 router.get('/', authenticateToken, async (req, res) => {
   try {
@@ -56,10 +58,37 @@ router.get('/', authenticateToken, async (req, res) => {
     const countWhereClause = wherePartsForCases.length ? `WHERE ${wherePartsForCases.join(' AND ')}` : '';
     const limitIndex = params.length + 1;
     const offsetIndex = params.length + 2;
+    const lifecyclePermissionSql = isAdmin
+      ? `TRUE AS "canArchive", TRUE AS "canDelete"`
+      : `
+          (
+            c.created_by_user_id = $1
+            OR EXISTS (
+              SELECT 1
+              FROM case_assignments owner_assignment
+              WHERE owner_assignment.case_id = c.id
+                AND owner_assignment.user_id = $1
+                AND owner_assignment.role = 'owner'
+                AND owner_assignment.is_active = TRUE
+            )
+          ) AS "canArchive",
+          (
+            c.created_by_user_id = $1
+            OR EXISTS (
+              SELECT 1
+              FROM case_assignments owner_assignment
+              WHERE owner_assignment.case_id = c.id
+                AND owner_assignment.user_id = $1
+                AND owner_assignment.role = 'owner'
+                AND owner_assignment.is_active = TRUE
+            )
+          ) AS "canDelete"
+        `;
 
     const query = `
       SELECT c.*, u.full_name as created_by_name,
-             (SELECT COUNT(*) FROM uploaded_files WHERE case_id = c.id) as file_count
+             (SELECT COUNT(*) FROM uploaded_files WHERE case_id = c.id) as file_count,
+             ${lifecyclePermissionSql}
       FROM cases c
       LEFT JOIN users u ON c.created_by_user_id = u.id
       ${whereClause}
@@ -181,6 +210,7 @@ router.get('/:id/summary/:module', authenticateToken, requireCaseAccess('viewer'
 /* ── GET /api/cases/:id — get case details ── */
 router.get('/:id', authenticateToken, requireCaseAccess('viewer'), async (req, res) => {
   try {
+    const isAdmin = ['super_admin', 'station_admin'].includes(req.user.role);
     const result = await pool.query(
       `SELECT c.*, u.full_name as created_by_name,
          (SELECT COUNT(*) FROM uploaded_files WHERE case_id = c.id) as file_count,
@@ -197,7 +227,23 @@ router.get('/:id', authenticateToken, requireCaseAccess('viewer'), async (req, r
     if (result.rows.length === 0) {
       return res.status(404).json({ error: 'Case not found' });
     }
-    res.json(result.rows[0]);
+
+    const caseRow = result.rows[0];
+    const assignments = Array.isArray(caseRow.assignments) ? caseRow.assignments : [];
+    const hasOwnerAssignment = assignments.some(
+      (assignment) =>
+        Number(assignment?.userId) === Number(req.user.userId) &&
+        String(assignment?.role || '').toLowerCase() === 'owner'
+    );
+    const canManageLifecycle = isAdmin
+      || Number(caseRow.created_by_user_id) === Number(req.user.userId)
+      || hasOwnerAssignment;
+
+    res.json({
+      ...caseRow,
+      canArchive: canManageLifecycle,
+      canDelete: canManageLifecycle,
+    });
   } catch (err) {
     console.error('Get case error:', err);
     res.status(500).json({ error: 'Failed to get case' });
@@ -326,12 +372,37 @@ router.get('/:id/timeline', authenticateToken, requireCaseAccess('viewer'), asyn
 /* ── POST /api/cases — create new case ── */
 router.post('/', authenticateToken, async (req, res) => {
   try {
-    const { caseName, operator, investigationDetails, startDate, endDate, priority, caseType, firNumber } = req.body;
-    if (!caseName) {
-      return res.status(400).json({ error: 'Case name is required' });
+    const {
+      caseName,
+      caseNumber,
+      operator,
+      investigationDetails,
+      startDate,
+      endDate,
+      priority,
+      caseType,
+      firNumber
+    } = req.body;
+
+    if (isBlank(caseName)) return res.status(400).json({ error: 'Case name is required.' });
+    if (isBlank(caseNumber)) return res.status(400).json({ error: 'Case number is required.' });
+    if (isBlank(operator)) return res.status(400).json({ error: 'Telecom operator is required.' });
+    if (isBlank(caseType)) return res.status(400).json({ error: 'Case type is required.' });
+    if (isBlank(priority)) return res.status(400).json({ error: 'Priority is required.' });
+    if (isBlank(firNumber)) return res.status(400).json({ error: 'FIR number is required.' });
+    if (isBlank(investigationDetails)) return res.status(400).json({ error: 'Investigation details are required.' });
+    if (isBlank(startDate)) return res.status(400).json({ error: 'Start date is required.' });
+    if (isBlank(endDate)) return res.status(400).json({ error: 'End date is required.' });
+
+    const parsedStartDate = new Date(startDate);
+    const parsedEndDate = new Date(endDate);
+    if (Number.isNaN(parsedStartDate.getTime()) || Number.isNaN(parsedEndDate.getTime())) {
+      return res.status(400).json({ error: 'Valid start and end dates are required.' });
+    }
+    if (parsedEndDate < parsedStartDate) {
+      return res.status(400).json({ error: 'End date cannot be earlier than start date.' });
     }
 
-    const caseNumber = generateCaseNumber(caseName);
     const userId = req.user.userId;
 
     const result = await pool.query(
@@ -339,8 +410,8 @@ router.post('/', authenticateToken, async (req, res) => {
          investigation_details, start_date, end_date, priority, created_by_user_id)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        RETURNING *`,
-      [caseName, caseNumber, caseType || null, firNumber || null, operator || null,
-       investigationDetails || null, startDate || null, endDate || null, priority || 'medium', userId]
+      [String(caseName).trim(), String(caseNumber).trim(), String(caseType).trim(), String(firNumber).trim(), String(operator).trim(),
+       String(investigationDetails).trim(), startDate, endDate, String(priority).trim(), userId]
     );
 
     const newCase = result.rows[0];
@@ -392,6 +463,64 @@ router.put('/:id', authenticateToken, requireCaseAccess('investigator'), checkEv
   } catch (err) {
     console.error('Update case error:', err);
     res.status(500).json({ error: 'Failed to update case' });
+  }
+});
+
+/* ── POST /api/cases/:id/archive ── */
+router.post('/:id/archive', authenticateToken, requireCaseAccess('owner'), checkEvidenceLock, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `UPDATE cases
+       SET status = 'archived',
+           updated_by_user_id = $1,
+           updated_at = NOW()
+       WHERE id = $2
+       RETURNING *`,
+      [req.user.userId, req.params.id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Case not found' });
+    }
+
+    await pool.query(
+      'INSERT INTO audit_logs (user_id, officer_buckle_id, action, resource_type, resource_id) VALUES ($1, $2, $3, $4, $5)',
+      [req.user.userId, req.user.buckleId, 'ARCHIVE_CASE', 'case', req.params.id]
+    );
+
+    res.json({ message: 'Case archived', case: result.rows[0] });
+  } catch (err) {
+    console.error('Archive case error:', err);
+    res.status(500).json({ error: 'Failed to archive case' });
+  }
+});
+
+/* ── POST /api/cases/:id/reopen ── */
+router.post('/:id/reopen', authenticateToken, requireCaseAccess('owner'), checkEvidenceLock, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `UPDATE cases
+       SET status = 'open',
+           updated_by_user_id = $1,
+           updated_at = NOW()
+       WHERE id = $2
+       RETURNING *`,
+      [req.user.userId, req.params.id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: 'Case not found' });
+    }
+
+    await pool.query(
+      'INSERT INTO audit_logs (user_id, officer_buckle_id, action, resource_type, resource_id) VALUES ($1, $2, $3, $4, $5)',
+      [req.user.userId, req.user.buckleId, 'REOPEN_CASE', 'case', req.params.id]
+    );
+
+    res.json({ message: 'Case reopened', case: result.rows[0] });
+  } catch (err) {
+    console.error('Reopen case error:', err);
+    res.status(500).json({ error: 'Failed to reopen case' });
   }
 });
 

@@ -10,7 +10,7 @@ const toneClasses: Record<StatusTone, string> = {
   healthy: 'border-emerald-200 bg-emerald-50/80 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-300',
   warning: 'border-amber-200 bg-amber-50/80 text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-300',
   error: 'border-red-200 bg-red-50/80 text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300',
-  neutral: 'border-slate-200 bg-slate-50/80 text-slate-700 dark:border-slate-800 dark:bg-slate-900/50 dark:text-slate-300',
+      neutral: 'border-slate-200 bg-slate-50/80 text-slate-700 dark:border-slate-800 dark:bg-card/60 dark:text-slate-300',
 }
 
 function StatusCard({
@@ -138,7 +138,7 @@ export default function SystemDiagnosticsPanel() {
     : 'No restore verification has been recorded yet.'
 
   return (
-    <section className="bg-surface-light dark:bg-surface-dark rounded-xl border border-border-light dark:border-slate-800 p-6">
+    <section className="rounded-xl border border-border-light bg-card/70 p-6 dark:border-slate-800">
       <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
         <div>
           <h2 className="text-xl font-black text-slate-900 dark:text-white">System Diagnostics</h2>
@@ -154,7 +154,7 @@ export default function SystemDiagnosticsPanel() {
             type="button"
             onClick={() => void runSelfCheck()}
             disabled={loading || selfChecking}
-            className="px-3 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 text-sm font-semibold hover:bg-slate-100 disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+            className="px-3 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 text-sm font-semibold hover:bg-slate-100 disabled:opacity-60 dark:border-slate-700 dark:bg-card dark:text-slate-200 dark:hover:bg-slate-800"
           >
             {selfChecking ? 'Running self-check...' : 'Run self-check'}
           </button>
@@ -193,7 +193,7 @@ export default function SystemDiagnosticsPanel() {
         </div>
       </div>
 
-      <div className="mt-5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-950/40 p-4">
+        <div className="mt-5 rounded-xl border border-slate-200 bg-slate-50/80 p-4 dark:border-slate-800 dark:bg-card/60">
         <div className="flex items-center justify-between gap-3">
           <h3 className="text-sm font-bold uppercase tracking-[0.18em] text-slate-700 dark:text-slate-300">
             Chatbot Capability
@@ -209,7 +209,7 @@ export default function SystemDiagnosticsPanel() {
         <h3 className="text-sm font-bold uppercase tracking-[0.18em] text-slate-700 dark:text-slate-300">
           Raw Diagnostics
         </h3>
-        <pre className="mt-2 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-950 text-slate-100 text-xs whitespace-pre-wrap break-words p-4 overflow-x-auto">
+        <pre className="mt-2 rounded-xl border border-slate-200 bg-slate-950 text-slate-100 text-xs whitespace-pre-wrap break-words p-4 overflow-x-auto dark:border-slate-800">
           {diagnostics
             ? JSON.stringify(diagnostics, null, 2)
             : JSON.stringify({ error: error || 'Diagnostics not loaded yet' }, null, 2)}

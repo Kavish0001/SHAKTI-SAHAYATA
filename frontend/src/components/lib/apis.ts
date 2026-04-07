@@ -231,12 +231,24 @@ export const caseAPI = {
       operator?: string
       case_type?: 'CDR' | 'IPDR' | 'SDR' | 'TOWER' | 'ILD'
       investigating_officer?: string
-      status?: 'active' | 'closed' | 'archived'
+      status?: 'open' | 'active' | 'closed' | 'archived'
     }
   ) {
     return apiClient.request(`/cases/${encodeURIComponent(id)}`, {
       method: 'PUT',
       body: data,
+    })
+  },
+
+  async archive(id: string) {
+    return apiClient.request(`/cases/${encodeURIComponent(id)}/archive`, {
+      method: 'POST',
+    })
+  },
+
+  async reopen(id: string) {
+    return apiClient.request(`/cases/${encodeURIComponent(id)}/reopen`, {
+      method: 'POST',
     })
   },
 

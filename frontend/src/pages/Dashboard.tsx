@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ArrowRight, BriefcaseBusiness, FolderPlus, RadioTower } from 'lucide-react'
+import { toast } from 'sonner'
 import { useAuthStore } from '../stores/authStore'
 import SessionClock from '../components/dashboard/SessionClock'
 import StatCards from '../components/dashboard/StatCards'
@@ -30,6 +31,9 @@ interface CaseSummary {
   priority?: string | null
   file_count?: number | null
   updated_at?: string | null
+  is_evidence_locked?: boolean | null
+  canArchive?: boolean
+  canDelete?: boolean
 }
 
 export default function Dashboard() {
@@ -38,6 +42,10 @@ export default function Dashboard() {
   const [stats, setStats] = useState<DashboardStats>({ totalCases: 0, activeCases: 0, totalFiles: 0, recentCases: [] })
   const [cases, setCases] = useState<CaseSummary[]>([])
   const [loading, setLoading] = useState(true)
+  const [pendingAction, setPendingAction] = useState<{ caseId: number | null; action: 'archive' | 'delete' | null }>({
+    caseId: null,
+    action: null,
+  })
 
   useEffect(() => {
     void loadDashboard()
@@ -69,6 +77,63 @@ export default function Dashboard() {
     }
 
     return map[priority] || map.low
+  }
+
+  const getStatusClass = (status?: string) => {
+    const map: Record<string, string> = {
+      open: 'status-open',
+      active: 'status-open',
+      archived: 'status-archived',
+      closed: 'status-closed',
+    }
+
+    return map[status || ''] || 'status-closed'
+  }
+
+  const handleArchiveCase = async (caseItem: CaseSummary, event: React.MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+
+    if (caseItem.is_evidence_locked) return
+
+    const confirmed = window.confirm(`Archive ${caseItem.case_name} and move it out of the active investigation workspace?`)
+    if (!confirmed) return
+
+    setPendingAction({ caseId: caseItem.id, action: 'archive' })
+
+    try {
+      await caseAPI.archive(String(caseItem.id))
+      toast.success(`${caseItem.case_name} was moved to archive.`)
+      await loadDashboard()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to archive case'
+      toast.error(message)
+    } finally {
+      setPendingAction({ caseId: null, action: null })
+    }
+  }
+
+  const handleDeleteCase = async (caseItem: CaseSummary, event: React.MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault()
+    event.stopPropagation()
+
+    if (caseItem.is_evidence_locked) return
+
+    const confirmed = window.confirm(`Delete ${caseItem.case_name} permanently? This will remove the case and its linked workspace data.`)
+    if (!confirmed) return
+
+    setPendingAction({ caseId: caseItem.id, action: 'delete' })
+
+    try {
+      await caseAPI.remove(String(caseItem.id))
+      toast.success(`${caseItem.case_name} was deleted.`)
+      await loadDashboard()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Failed to delete case'
+      toast.error(message)
+    } finally {
+      setPendingAction({ caseId: null, action: null })
+    }
   }
 
   if (loading) {
@@ -202,12 +267,42 @@ export default function Dashboard() {
                         </div>
                       </div>
                       <div className="flex flex-col items-end gap-2">
-                        <Badge className={c.status === 'open' || c.status === 'active' ? 'status-open rounded-full' : 'status-closed rounded-full'}>
+                        <Badge className={`${getStatusClass(c.status)} rounded-full`}>
                           {c.status}
                         </Badge>
                         <Badge className={`${getPriorityClass(c.priority ?? undefined)} rounded-full`}>
                           {c.priority || 'normal'}
                         </Badge>
+                        {(c.canArchive || c.canDelete) ? (
+                          <div className="mt-1 flex flex-col items-end gap-2">
+                            {c.canArchive && c.status !== 'archived' ? (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={(event) => void handleArchiveCase(c, event)}
+                                disabled={(pendingAction.caseId === c.id && pendingAction.action === 'archive') || Boolean(c.is_evidence_locked)}
+                                title={c.is_evidence_locked ? 'Evidence lock prevents case archival.' : 'Move this case to archive'}
+                                className="h-8 rounded-full border-amber-300/60 bg-amber-50/80 px-3 text-xs font-semibold text-amber-700 hover:bg-amber-100/80 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200 dark:hover:bg-amber-500/20"
+                              >
+                                {pendingAction.caseId === c.id && pendingAction.action === 'archive' ? 'Closing...' : 'Close Case'}
+                              </Button>
+                            ) : null}
+                            {c.canDelete ? (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={(event) => void handleDeleteCase(c, event)}
+                                disabled={(pendingAction.caseId === c.id && pendingAction.action === 'delete') || Boolean(c.is_evidence_locked)}
+                                title={c.is_evidence_locked ? 'Evidence lock prevents case deletion.' : 'Delete this case permanently'}
+                                className="h-8 rounded-full border-red-300/60 bg-red-50/80 px-3 text-xs font-semibold text-red-700 hover:bg-red-100/80 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-200 dark:hover:bg-red-500/20"
+                              >
+                                {pendingAction.caseId === c.id && pendingAction.action === 'delete' ? 'Deleting...' : 'Delete Case'}
+                              </Button>
+                            ) : null}
+                          </div>
+                        ) : null}
                       </div>
                     </div>
                   </CardHeader>
