@@ -536,6 +536,9 @@ CREATE TABLE IF NOT EXISTS admin_accounts (
     created_at              TIMESTAMPTZ DEFAULT NOW(),
     updated_at              TIMESTAMPTZ DEFAULT NOW()
 );
+ALTER TABLE admin_accounts ADD COLUMN IF NOT EXISTS totp_secret TEXT;
+ALTER TABLE admin_accounts ADD COLUMN IF NOT EXISTS totp_enabled BOOLEAN DEFAULT FALSE;
+ALTER TABLE admin_accounts ADD COLUMN IF NOT EXISTS totp_enforced_at TIMESTAMPTZ;
 CREATE INDEX IF NOT EXISTS idx_admin_accounts_email ON admin_accounts(email);
 
 -- ============================================================
@@ -571,6 +574,7 @@ CREATE TABLE IF NOT EXISTS admin_sessions (
     logout_reason       VARCHAR(50)
                         CHECK (logout_reason IN ('manual', 'expired', 'admin_forced', 'lockout'))
 );
+ALTER TABLE admin_sessions ADD COLUMN IF NOT EXISTS last_reauthenticated_at TIMESTAMPTZ DEFAULT NOW();
 CREATE INDEX IF NOT EXISTS idx_admin_sessions_account ON admin_sessions(admin_account_id);
 CREATE INDEX IF NOT EXISTS idx_admin_sessions_active ON admin_sessions(admin_account_id) WHERE ended_at IS NULL;
 
@@ -593,7 +597,20 @@ CREATE INDEX IF NOT EXISTS idx_admin_action_logs_action ON admin_action_logs(act
 CREATE INDEX IF NOT EXISTS idx_admin_action_logs_created ON admin_action_logs(created_at);
 
 -- ============================================================
--- 025: admin_activity_feed_v
+-- 025: admin_alert_acknowledgements
+-- ============================================================
+CREATE TABLE IF NOT EXISTS admin_alert_acknowledgements (
+    id                  SERIAL PRIMARY KEY,
+    alert_key           TEXT NOT NULL UNIQUE,
+    acknowledged_by     INTEGER REFERENCES admin_accounts(id) ON DELETE SET NULL,
+    note                TEXT,
+    acknowledged_at     TIMESTAMPTZ DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_admin_alert_ack_alert_key ON admin_alert_acknowledgements(alert_key);
+
+-- ============================================================
+-- 026: admin_activity_feed_v
 -- ============================================================
 CREATE OR REPLACE VIEW admin_activity_feed_v AS
 SELECT

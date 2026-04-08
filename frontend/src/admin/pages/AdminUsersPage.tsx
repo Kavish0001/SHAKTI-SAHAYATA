@@ -3,6 +3,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, LogOut, ShieldCheck, Users } from 'lucide-react'
 import { Link, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
+import { ApiError } from '../../lib/apiClient'
+import AdminRecentAuthDialog from '../components/AdminRecentAuthDialog'
 import type { AdminSessionRow } from '../types'
 import { adminConsoleAPI } from '../lib/api'
 import { useAdminAuthStore } from '../store/adminAuthStore'
@@ -16,6 +18,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Textarea } from '@/components/ui/textarea'
 
 const formatTimestamp = (value?: string | null) => {
   if (!value) return 'Never'
@@ -41,6 +44,8 @@ export default function AdminUsersPage() {
 
   const [activeOnly, setActiveOnly] = useState(true)
   const [targetSession, setTargetSession] = useState<AdminSessionRow | null>(null)
+  const [forceLogoutReason, setForceLogoutReason] = useState('Suspicious or stale session ended by IT')
+  const [recentAuthOpen, setRecentAuthOpen] = useState(false)
 
   const usersQuery = useQuery({
     queryKey: ['admin-users'],
@@ -65,10 +70,11 @@ export default function AdminUsersPage() {
 
   const forceLogoutMutation = useMutation({
     mutationFn: async (session: AdminSessionRow) =>
-      adminConsoleAPI.forceLogout(session.id, session.session_type, 'Suspicious or stale session ended by IT'),
+      adminConsoleAPI.forceLogout(session.id, session.session_type, forceLogoutReason.trim() || 'admin_forced'),
     onSuccess: async (_result, session) => {
       toast.success(`${session.actor_name} was signed out successfully.`)
       setTargetSession(null)
+      setForceLogoutReason('Suspicious or stale session ended by IT')
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ['admin-users'] }),
         queryClient.invalidateQueries({ queryKey: ['admin-sessions'] }),
@@ -81,6 +87,10 @@ export default function AdminUsersPage() {
       }
     },
     onError: (error) => {
+      if (error instanceof ApiError && error.code === 'RECENT_ADMIN_AUTH_REQUIRED') {
+        setRecentAuthOpen(true)
+        return
+      }
       const message = error instanceof Error ? error.message : 'Failed to force logout the selected session.'
       toast.error(message)
     },
@@ -373,6 +383,19 @@ export default function AdminUsersPage() {
                 </div>
               </div>
 
+              <div className="space-y-2">
+                <label htmlFor="force-logout-reason" className="text-sm font-medium text-muted-foreground">
+                  Reason for force logout
+                </label>
+                <Textarea
+                  id="force-logout-reason"
+                  value={forceLogoutReason}
+                  onChange={(event) => setForceLogoutReason(event.target.value)}
+                  rows={3}
+                  placeholder="Capture why this session is being ended."
+                />
+              </div>
+
               <DialogFooter>
                 <Button type="button" variant="outline" onClick={() => setTargetSession(null)}>
                   Cancel
@@ -380,7 +403,7 @@ export default function AdminUsersPage() {
                 <Button
                   type="button"
                   variant="destructive"
-                  disabled={forceLogoutMutation.isPending}
+                  disabled={forceLogoutMutation.isPending || !forceLogoutReason.trim()}
                   onClick={() => targetSession && forceLogoutMutation.mutate(targetSession)}
                 >
                   {forceLogoutMutation.isPending ? 'Ending session…' : 'Confirm Force Logout'}
@@ -390,6 +413,19 @@ export default function AdminUsersPage() {
           ) : null}
         </DialogContent>
       </Dialog>
+
+      <AdminRecentAuthDialog
+        open={recentAuthOpen}
+        onOpenChange={setRecentAuthOpen}
+        title="Recent auth required to force logout"
+        description="Force logout is a privileged admin write action. Refresh your admin authentication and the session termination will retry automatically."
+        onSuccess={async () => {
+          setRecentAuthOpen(false)
+          if (targetSession) {
+            await forceLogoutMutation.mutateAsync(targetSession)
+          }
+        }}
+      />
     </div>
   )
 }

@@ -9,8 +9,10 @@ import {
   setAdminRefreshCookie,
   signAdminAccessToken
 } from '../../config/adminAuth.js';
+import { ADMIN_CONSOLE_CONFIG } from '../../config/adminConsole.js';
 import { authenticateAdminToken } from '../../middleware/admin/authenticateAdminToken.js';
 import { logAdminAction } from '../../services/admin/adminAudit.service.js';
+import { getAdminTotpPolicyState, verifyAdminTotpCode } from '../../services/admin/adminTotp.service.js';
 
 const router = Router();
 
@@ -21,7 +23,10 @@ const createRefreshToken = () => crypto.randomBytes(40).toString('hex');
 const hashToken = (token) => crypto.createHash('sha256').update(token).digest('hex');
 
 const buildAccessTokenPayload = (admin) => {
-  const accessToken = signAdminAccessToken(admin);
+  const accessToken = signAdminAccessToken(admin, {
+    sessionId: admin.session_id || null,
+    recentAuthAt: admin.recent_auth_at || Math.floor(Date.now() / 1000),
+  });
   return {
     accessToken,
     expiresAt: decodeAdminAccessTokenExpiry(accessToken)
@@ -33,7 +38,7 @@ const createSessionRecord = async ({ adminAccountId, ipAddress, userAgent }) => 
     `
       INSERT INTO admin_sessions (admin_account_id, ip_address, user_agent)
       VALUES ($1, $2, $3)
-      RETURNING id, started_at
+      RETURNING id, started_at, last_reauthenticated_at
     `,
     [adminAccountId, ipAddress, userAgent]
   );
@@ -44,6 +49,7 @@ const getLatestActiveSession = async (adminAccountId) => {
   const result = await pool.query(
     `
       SELECT id, started_at
+           , last_reauthenticated_at
       FROM admin_sessions
       WHERE admin_account_id = $1 AND ended_at IS NULL
       ORDER BY started_at DESC
@@ -139,7 +145,14 @@ const rotateRefreshToken = async ({ existingToken, ipAddress, userAgent }) => {
 const getRefreshTokenFromCookie = (req) => req.cookies?.[ADMIN_AUTH_CONFIG.refreshCookieName] || null;
 
 const buildAdminResponse = async ({ admin, session, res, refreshToken }) => {
-  const tokenPayload = buildAccessTokenPayload(admin);
+  const tokenAdmin = {
+    ...admin,
+    session_id: session?.id || admin.session_id || null,
+    recent_auth_at: session?.last_reauthenticated_at
+      ? Math.floor(new Date(session.last_reauthenticated_at).getTime() / 1000)
+      : admin.recent_auth_at || Math.floor(Date.now() / 1000),
+  };
+  const normalizedTokenPayload = buildAccessTokenPayload(tokenAdmin);
 
   if (refreshToken) {
     setAdminRefreshCookie(res, refreshToken);
@@ -153,12 +166,13 @@ const buildAdminResponse = async ({ admin, session, res, refreshToken }) => {
       role: admin.role,
       permissions: Array.isArray(admin.permissions) ? admin.permissions : []
     },
-    accessToken: tokenPayload.accessToken,
-    expiresAt: tokenPayload.expiresAt,
+    accessToken: normalizedTokenPayload.accessToken,
+    expiresAt: normalizedTokenPayload.expiresAt,
     session: session
       ? {
           id: session.id,
-          startedAt: session.started_at
+          startedAt: session.started_at,
+          lastReauthenticatedAt: session.last_reauthenticated_at || null,
         }
       : null
   };
@@ -173,6 +187,19 @@ const getAdminByEmail = async (email) => {
       LIMIT 1
     `,
     [email]
+  );
+  return result.rows[0] || null;
+};
+
+const getAdminById = async (adminId) => {
+  const result = await pool.query(
+    `
+      SELECT *
+      FROM admin_accounts
+      WHERE id = $1
+      LIMIT 1
+    `,
+    [adminId]
   );
   return result.rows[0] || null;
 };
@@ -234,6 +261,7 @@ const resetFailedLogins = async (adminId) => {
 router.post('/login', async (req, res) => {
   const email = String(req.body?.email || '').trim().toLowerCase();
   const password = String(req.body?.password || '');
+  const totpCode = String(req.body?.totpCode || '').trim();
 
   if (!email || !password) {
     return res.status(400).json({ error: 'Email and password are required' });
@@ -277,6 +305,28 @@ router.post('/login', async (req, res) => {
         details: { email }
       });
       return res.status(401).json({ error: 'Invalid admin credentials' });
+    }
+
+    const totpState = getAdminTotpPolicyState(admin);
+    if (totpState.required) {
+      if (!totpState.enrolled) {
+        return res.status(403).json({
+          error: 'TOTP enrollment is required before this admin can sign in.',
+          code: 'ADMIN_TOTP_ENROLLMENT_REQUIRED',
+        });
+      }
+
+      if (!verifyAdminTotpCode(admin.totp_secret, totpCode)) {
+        await logAdminAction({
+          adminAccountId: admin.id,
+          action: 'ADMIN_TOTP_FAILED',
+          resourceType: 'admin_account',
+          resourceId: String(admin.id),
+          ipAddress: req.ip,
+          details: { email }
+        });
+        return res.status(401).json({ error: 'Invalid TOTP code', code: 'ADMIN_TOTP_REQUIRED' });
+      }
     }
 
     await resetFailedLogins(admin.id);
@@ -353,7 +403,10 @@ router.post('/refresh', async (req, res) => {
       email: existingToken.email,
       full_name: existingToken.full_name,
       role: existingToken.role,
-      permissions: existingToken.permissions
+      permissions: existingToken.permissions,
+      recent_auth_at: session?.last_reauthenticated_at
+        ? Math.floor(new Date(session.last_reauthenticated_at).getTime() / 1000)
+        : undefined,
     };
 
     return res.json(await buildAdminResponse({ admin, session, res, refreshToken: rotated.rawToken }));
@@ -386,7 +439,10 @@ router.get('/bootstrap', async (req, res) => {
       email: existingToken.email,
       full_name: existingToken.full_name,
       role: existingToken.role,
-      permissions: existingToken.permissions
+      permissions: existingToken.permissions,
+      recent_auth_at: session?.last_reauthenticated_at
+        ? Math.floor(new Date(session.last_reauthenticated_at).getTime() / 1000)
+        : undefined,
     };
 
     const payload = await buildAdminResponse({ admin, session, res });
@@ -436,7 +492,17 @@ router.get('/me', authenticateAdminToken, async (req, res) => {
   try {
     const result = await pool.query(
       `
-        SELECT id, email, full_name, role, permissions, is_active, last_login, created_at
+        SELECT
+          id,
+          email,
+          full_name,
+          role,
+          permissions,
+          is_active,
+          last_login,
+          created_at,
+          COALESCE(totp_enabled, FALSE) AS totp_enabled,
+          CASE WHEN totp_secret IS NOT NULL AND TRIM(totp_secret) <> '' THEN TRUE ELSE FALSE END AS totp_secret_configured
         FROM admin_accounts
         WHERE id = $1
         LIMIT 1
@@ -457,11 +523,88 @@ router.get('/me', authenticateAdminToken, async (req, res) => {
       permissions: Array.isArray(admin.permissions) ? admin.permissions : [],
       isActive: admin.is_active,
       lastLogin: admin.last_login,
-      createdAt: admin.created_at
+      createdAt: admin.created_at,
+      totpEnabled: Boolean(admin.totp_enabled),
+      totpSecretConfigured: Boolean(admin.totp_secret_configured),
+      recentAuthWindowMinutes: ADMIN_CONSOLE_CONFIG.recentAuthWindowMinutes,
     });
   } catch (error) {
     console.error('[ADMIN_AUTH] Get admin error:', error);
     return res.status(500).json({ error: 'Failed to get admin account info' });
+  }
+});
+
+router.post('/re-auth', authenticateAdminToken, async (req, res) => {
+  const password = String(req.body?.password || '');
+  const totpCode = String(req.body?.totpCode || '').trim();
+
+  if (!password) {
+    return res.status(400).json({ error: 'Password is required' });
+  }
+
+  try {
+    const admin = await getAdminById(req.admin.adminId);
+    if (!admin || !admin.is_active) {
+      return res.status(404).json({ error: 'Admin account not found' });
+    }
+
+    const validPassword = await bcrypt.compare(password, admin.password_hash);
+    if (!validPassword) {
+      await logAdminAction({
+        adminAccountId: admin.id,
+        sessionId: req.admin.sessionId,
+        action: 'ADMIN_REAUTH_FAILED',
+        resourceType: 'admin_account',
+        resourceId: String(admin.id),
+        ipAddress: req.ip,
+      });
+      return res.status(401).json({ error: 'Invalid admin credentials' });
+    }
+
+    const totpState = getAdminTotpPolicyState(admin);
+    if (totpState.required && !verifyAdminTotpCode(admin.totp_secret, totpCode)) {
+      await logAdminAction({
+        adminAccountId: admin.id,
+        sessionId: req.admin.sessionId,
+        action: 'ADMIN_REAUTH_TOTP_FAILED',
+        resourceType: 'admin_account',
+        resourceId: String(admin.id),
+        ipAddress: req.ip,
+      });
+      return res.status(401).json({ error: 'Invalid TOTP code', code: 'ADMIN_TOTP_REQUIRED' });
+    }
+
+    const sessionResult = await pool.query(
+      `
+        UPDATE admin_sessions
+        SET last_reauthenticated_at = NOW()
+        WHERE id = $1
+        RETURNING id, started_at, last_reauthenticated_at
+      `,
+      [req.admin.sessionId]
+    );
+
+    const session = sessionResult.rows[0] || await getLatestActiveSession(admin.id);
+    const payload = await buildAdminResponse({ admin, session, res });
+
+    await logAdminAction({
+      adminAccountId: admin.id,
+      sessionId: session?.id || req.admin.sessionId || null,
+      action: 'ADMIN_REAUTH',
+      resourceType: 'admin_session',
+      resourceId: session?.id || req.admin.sessionId || null,
+      ipAddress: req.ip,
+    });
+
+    return res.json({
+      message: 'Recent admin authentication refreshed',
+      accessToken: payload.accessToken,
+      expiresAt: payload.expiresAt,
+      session: payload.session,
+    });
+  } catch (error) {
+    console.error('[ADMIN_AUTH] Re-auth error:', error);
+    return res.status(500).json({ error: 'Failed to refresh recent admin authentication' });
   }
 });
 

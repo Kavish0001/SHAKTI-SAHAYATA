@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import pool from '../../config/database.js';
 import { authenticateAdminToken } from '../../middleware/admin/authenticateAdminToken.js';
-import { requireAdminRole } from '../../middleware/admin/authorizeAdmin.js';
+import { requireAdminPermission, requireAdminRole, requireRecentAdminAuth } from '../../middleware/admin/authorizeAdmin.js';
 import { getLiveHealth, getReadyHealth, getStartupStatus } from '../../services/runtimeStatus.service.js';
 import { logAdminAction } from '../../services/admin/adminAudit.service.js';
 import {
@@ -499,16 +499,23 @@ router.get('/cases', async (req, res) => {
   }
 });
 
-router.get('/cases/export', async (req, res) => {
+router.get('/cases/export', requireAdminPermission('export_cases'), requireRecentAdminAuth(), async (req, res) => {
   try {
     const rows = await exportAdminCases(req.query);
     await logAdminAction({
       adminAccountId: req.admin.adminId,
+      sessionId: req.admin.sessionId,
       action: 'EXPORT_CASE_GOVERNANCE',
-      resourceType: 'case',
-      resourceId: null,
+      resourceType: 'export',
+      resourceId: 'cases',
       ipAddress: req.ip,
-      details: { filters: req.query, exportedCount: rows.length },
+      details: {
+        scope: 'cases',
+        filters: req.query,
+        reason: String(req.query.reason || '').trim() || null,
+        exportedCount: rows.length,
+        result: 'success',
+      },
     });
 
     const csv = buildCsv(
@@ -565,16 +572,23 @@ router.get('/files', async (req, res) => {
   }
 });
 
-router.get('/files/export', async (req, res) => {
+router.get('/files/export', requireAdminPermission('export_files'), requireRecentAdminAuth(), async (req, res) => {
   try {
     const rows = await exportAdminFiles(req.query);
     await logAdminAction({
       adminAccountId: req.admin.adminId,
+      sessionId: req.admin.sessionId,
       action: 'EXPORT_FILE_GOVERNANCE',
-      resourceType: 'file',
-      resourceId: null,
+      resourceType: 'export',
+      resourceId: 'files',
       ipAddress: req.ip,
-      details: { filters: req.query, exportedCount: rows.length },
+      details: {
+        scope: 'files',
+        filters: req.query,
+        reason: String(req.query.reason || '').trim() || null,
+        exportedCount: rows.length,
+        result: 'success',
+      },
     });
 
     const csv = buildCsv(
@@ -617,16 +631,23 @@ router.get('/files/deletions', async (req, res) => {
   }
 });
 
-router.get('/files/deletions/export', async (req, res) => {
+router.get('/files/deletions/export', requireAdminPermission('export_files'), requireRecentAdminAuth(), async (req, res) => {
   try {
     const rows = await exportAdminFileDeletions(req.query);
     await logAdminAction({
       adminAccountId: req.admin.adminId,
+      sessionId: req.admin.sessionId,
       action: 'EXPORT_FILE_DELETION_TRACE',
-      resourceType: 'file',
-      resourceId: null,
+      resourceType: 'export',
+      resourceId: 'file-deletions',
       ipAddress: req.ip,
-      details: { filters: req.query, exportedCount: rows.length },
+      details: {
+        scope: 'file-deletions',
+        filters: req.query,
+        reason: String(req.query.reason || '').trim() || null,
+        exportedCount: rows.length,
+        result: 'success',
+      },
     });
 
     const csv = buildCsv(
@@ -731,7 +752,12 @@ router.get('/database/tables/:table/rows', async (req, res) => {
   }
 });
 
-router.post('/sessions/:sessionId/force-logout', requireAdminRole('it_admin'), async (req, res) => {
+router.post(
+  '/sessions/:sessionId/force-logout',
+  requireAdminRole('it_admin'),
+  requireAdminPermission('force_logout'),
+  requireRecentAdminAuth(),
+  async (req, res) => {
   const sessionId = String(req.params.sessionId || '').trim();
   const sessionType = String(req.body?.sessionType || '').trim().toLowerCase();
   const reason = String(req.body?.reason || 'admin_forced').trim();
@@ -768,6 +794,7 @@ router.post('/sessions/:sessionId/force-logout', requireAdminRole('it_admin'), a
 
       await logAdminAction({
         adminAccountId: req.admin.adminId,
+        sessionId: req.admin.sessionId,
         action: 'FORCE_LOGOUT_OFFICER_SESSION',
         resourceType: 'session',
         resourceId: sessionId,
@@ -804,6 +831,7 @@ router.post('/sessions/:sessionId/force-logout', requireAdminRole('it_admin'), a
 
     await logAdminAction({
       adminAccountId: req.admin.adminId,
+      sessionId: req.admin.sessionId,
       action: 'FORCE_LOGOUT_ADMIN_SESSION',
       resourceType: 'admin_session',
       resourceId: sessionId,

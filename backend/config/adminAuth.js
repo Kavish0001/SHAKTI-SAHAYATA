@@ -60,7 +60,7 @@ export const ADMIN_AUTH_CONFIG = {
   allowedOrigins: ADMIN_ALLOWED_ORIGINS
 };
 
-export const signAdminAccessToken = (admin) =>
+export const signAdminAccessToken = (admin, options = {}) =>
   jwt.sign(
     {
       adminId: admin.id,
@@ -68,7 +68,9 @@ export const signAdminAccessToken = (admin) =>
       fullName: admin.full_name,
       role: admin.role,
       permissions: Array.isArray(admin.permissions) ? admin.permissions : [],
-      accountType: 'it_admin'
+      accountType: 'it_admin',
+      sessionId: options.sessionId || null,
+      recentAuthAt: options.recentAuthAt || Math.floor(Date.now() / 1000),
     },
     ADMIN_AUTH_CONFIG.jwtSecret,
     { expiresIn: ADMIN_AUTH_CONFIG.accessTokenTtl, audience: 'admin-console', subject: String(admin.id) }

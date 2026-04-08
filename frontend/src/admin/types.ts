@@ -7,11 +7,15 @@ export interface AdminIdentity {
   isActive?: boolean
   lastLogin?: string | null
   createdAt?: string | null
+  totpEnabled?: boolean
+  totpSecretConfigured?: boolean
+  recentAuthWindowMinutes?: number
 }
 
 export interface AdminSessionInfo {
   id: string | null
   startedAt: string | null
+  lastReauthenticatedAt?: string | null
 }
 
 export type AdminAuthStatus = 'unknown' | 'authenticated' | 'unauthenticated'
@@ -441,4 +445,174 @@ export interface SafeBrowsePage {
     by: string
     dir: string
   }
+}
+
+export interface AdminSystemStatusBlock {
+  status: string
+  detail: string
+  checkedAt?: string
+  [key: string]: unknown
+}
+
+export interface AdminSystemHealthResponse {
+  generatedAt: string
+  overallStatus: string
+  backend: {
+    live: AdminHealthSection
+    ready: AdminHealthSection
+    startup: AdminHealthSection
+  }
+  database: AdminSystemStatusBlock & {
+    connected?: boolean
+    latencyMs?: number
+    serverTime?: string | null
+    metrics?: Record<string, number>
+    pool?: {
+      totalCount: number
+      idleCount: number
+      waitingCount: number
+    }
+  }
+  uploads: AdminSystemStatusBlock & {
+    path?: string
+    writable?: boolean
+    topLevelFileCount?: number
+  }
+  backups: AdminSystemStatusBlock & {
+    latestBackup?: Record<string, unknown> | null
+    latestRestore?: Record<string, unknown> | null
+  }
+  runtime: AdminSystemStatusBlock & {
+    nodeVersion?: string
+    platform?: string
+    hostname?: string
+    uptimeSeconds?: number
+    memory?: {
+      rss: number
+      heapTotal: number
+      heapUsed: number
+      external: number
+    }
+  }
+  security: {
+    totp: AdminSystemStatusBlock & {
+      enforced?: boolean
+      currentRoleRequiresTotp?: boolean
+      currentAdminEnrolled?: boolean
+      requiredRoles?: string[]
+    }
+    sessionRotation: AdminSystemStatusBlock
+    networkRestriction: AdminSystemStatusBlock & {
+      mode?: string
+      clientIp?: string | null
+      matched?: boolean
+    }
+    recentAuth: AdminSystemStatusBlock & {
+      recentAuthWindowMinutes?: number
+    }
+  }
+  retention: {
+    running: boolean
+    startedAt: string | null
+    completedAt: string | null
+    lastResult: null | {
+      status: string
+      startedAt: string
+      completedAt: string
+      deletedSessions: number
+      deletedRefreshTokens: number
+      deletedActionLogs: number
+      policies: {
+        sessionDays: number
+        refreshTokenDays: number
+        actionLogDays: number
+      }
+    }
+    lastError: string | null
+    policies: {
+      sessionDays: number
+      refreshTokenDays: number
+      actionLogDays: number
+      intervalMinutes: number
+    }
+  }
+  selfChecks: Array<{
+    id: number
+    createdAt: string
+    actorName: string
+    actorEmail: string | null
+    status: string
+    failedChecks: string[]
+    degradedChecks: string[]
+    durationMs: number | null
+  }>
+}
+
+export interface AdminSelfCheckResponse {
+  status: string
+  startedAt: string
+  completedAt: string
+  durationMs: number
+  failedChecks: string[]
+  degradedChecks: string[]
+  snapshot: AdminSystemHealthResponse
+}
+
+export interface AdminAlertItem {
+  id: string
+  rule: string
+  severity: 'critical' | 'warning' | 'info'
+  status: string
+  title: string
+  summary: string
+  href: string
+  remediation: string
+  metric: string | number
+  threshold: string | number
+  evidence: Record<string, unknown>
+  acknowledged: boolean
+  acknowledgedAt: string | null
+  note: string | null
+  acknowledgedBy: string | null
+  acknowledgedByEmail: string | null
+}
+
+export interface AdminAlertsResponse {
+  generatedAt: string
+  summary: {
+    total: number
+    critical: number
+    warning: number
+    acknowledged: number
+  }
+  items: AdminAlertItem[]
+}
+
+export interface AdminAlertAcknowledgementResponse {
+  acknowledged: boolean
+  alertId: string
+  acknowledgement: {
+    alert_key: string
+    acknowledged_at: string
+    note: string | null
+  } | null
+}
+
+export interface AdminExportHistoryItem {
+  id: number
+  action: string
+  createdAt: string
+  actorName: string
+  actorEmail: string | null
+  actorRole: string | null
+  exportScope: string | null
+  filters: Record<string, unknown>
+  reason: string | null
+  exportedCount: number
+  result: string
+  watermark: Record<string, unknown> | null
+}
+
+export interface AdminExportHistoryResponse {
+  items: AdminExportHistoryItem[]
 }

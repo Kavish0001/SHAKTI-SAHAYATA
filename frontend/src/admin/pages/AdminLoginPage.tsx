@@ -17,6 +17,7 @@ export default function AdminLoginPage() {
   const { admin, authStatus, setAuth } = useAdminAuthStore()
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [totpCode, setTotpCode] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
@@ -33,7 +34,7 @@ export default function AdminLoginPage() {
     setLoading(true)
 
     try {
-      const data = await adminAuthAPI.login(email.trim().toLowerCase(), password)
+      const data = await adminAuthAPI.loginWithTotp(email.trim().toLowerCase(), password, totpCode.trim())
       setAuth(data.accessToken, data.admin, data.session)
       navigate('/admin', { replace: true })
     } catch (error: unknown) {
@@ -123,6 +124,24 @@ export default function AdminLoginPage() {
                     {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </Button>
                 </div>
+              </div>
+
+              <div className="space-y-2">
+                <label htmlFor="admin-totp" className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                  TOTP Code
+                </label>
+                <Input
+                  id="admin-totp"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  value={totpCode}
+                  onChange={(event) => setTotpCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
+                  placeholder="6-digit authenticator code"
+                  className="h-12 rounded-xl border-slate-200 bg-white/80 dark:border-white/10 dark:bg-surface-900/90"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Required when TOTP enforcement is enabled for your admin role.
+                </p>
               </div>
 
               <Button type="submit" disabled={loading} className="h-12 w-full rounded-2xl text-base bg-slate-900 hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200">

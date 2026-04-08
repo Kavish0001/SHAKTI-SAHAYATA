@@ -27,7 +27,9 @@ import osintRoutes from './routes/osint.js';
 import systemRoutes from './routes/system.js';
 import adminAuthRoutes from './routes/admin/auth.js';
 import adminConsoleRoutes from './routes/admin/console.js';
+import adminOperationsRoutes from './routes/admin/operations.js';
 import { adminOriginGuard } from './middleware/admin/adminOriginGuard.js';
+import { adminNetworkGuard } from './middleware/admin/adminNetworkGuard.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -89,8 +91,10 @@ export const createApp = () => {
   app.use('/api/admin/auth/login', adminAuthRateLimit);
   app.use('/api/auth', authRoutes);
   app.use('/api/admin', adminOriginGuard);
+  app.use('/api/admin', adminNetworkGuard);
   app.use('/api/admin/auth', adminAuthRoutes);
   app.use('/api/admin', rateLimit, adminConsoleRoutes);
+  app.use('/api/admin', rateLimit, adminOperationsRoutes);
   app.use('/api/cases', rateLimit, casesRoutes);
   app.use('/api/files', rateLimit, filesRoutes);
   app.use('/api/dashboard', rateLimit, dashboardRoutes);

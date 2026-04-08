@@ -5,6 +5,7 @@ import { getOllamaRuntimeConfig } from './services/chatbot/config.js';
 import { AUTH_CONFIG } from './config/auth.js';
 import { createApp, resolveUploadDir } from './app.js';
 import { getStartupStatus, runStartupSelfChecks } from './services/runtimeStatus.service.js';
+import { runAdminRetentionJob, startAdminRetentionScheduler } from './services/admin/adminRetention.service.js';
 
 const PORT = process.env.BACKEND_PORT || process.env.PORT || 3001;
 const __filename = fileURLToPath(import.meta.url);
@@ -25,6 +26,11 @@ export const startServer = async () => {
     uploadDir: resolveUploadDir(),
     ollamaRequired: false,
   });
+
+  runAdminRetentionJob().catch((error) => {
+    console.error('[ADMIN_RETENTION] Initial retention job failed:', error?.message || error);
+  });
+  startAdminRetentionScheduler();
 
   if (startupChecks.status === 'fail') {
     console.error('[STARTUP] Critical self-checks failed:', startupChecks.summary.failed.join(', '));

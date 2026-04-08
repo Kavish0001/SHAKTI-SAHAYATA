@@ -47,7 +47,7 @@ const queryMock = vi.fn(async (sql, params = []) => {
     return { rows: [], rowCount: 1 };
   }
 
-  if (text.includes('SELECT id, email, full_name, role, permissions, is_active, last_login, created_at')) {
+  if (text.includes('FROM admin_accounts') && text.includes('totp_enabled')) {
     return { rows: [{ ...adminAccount }], rowCount: 1 };
   }
 

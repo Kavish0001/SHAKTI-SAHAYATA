@@ -1,4 +1,4 @@
-import { Database, FileStack, Gauge, LayoutDashboard, LogOut, MonitorCog, ShieldCheck, Users } from 'lucide-react'
+import { Database, FileSpreadsheet, FileStack, Gauge, LayoutDashboard, LogOut, MonitorCog, ShieldAlert, ShieldCheck, Users } from 'lucide-react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useAdminAuthStore } from '../store/adminAuthStore'
 import { Button } from '@/components/ui/button'
@@ -11,6 +11,8 @@ const navigation = [
   { to: '/admin/files', label: 'Files', icon: FileStack },
   { to: '/admin/database', label: 'Database', icon: Database },
   { to: '/admin/system', label: 'System', icon: MonitorCog },
+  { to: '/admin/alerts', label: 'Alerts', icon: ShieldAlert },
+  { to: '/admin/exports', label: 'Exports', icon: FileSpreadsheet },
 ]
 
 export default function AdminLayout() {
@@ -67,7 +69,7 @@ export default function AdminLayout() {
           </nav>
 
           <div className="mt-8 rounded-2xl border border-dashed border-white/15 bg-white/5 p-4 text-sm text-slate-300">
-            Phase 4 adds a read-only database explorer so IT can inspect schema links and masked table samples without shell access or mutation tooling.
+            Phase 5 turns the console into an operational workspace with system health, alerting, audited exports, recent-auth challenges, and production-facing admin guardrails.
           </div>
 
           <Button

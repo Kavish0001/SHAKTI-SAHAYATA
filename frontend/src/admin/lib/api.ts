@@ -2,17 +2,22 @@ import { ApiError, resolveBackendBaseUrl } from '../../lib/apiClient'
 import { adminApiClient, getAdminAccessToken } from './adminApiClient'
 import type {
   ActivityFeedResponse,
+  AdminAlertAcknowledgementResponse,
+  AdminAlertsResponse,
   AdminAnalysisResponse,
   AdminDatabaseSchemaResponse,
   AdminDatabaseTableResponse,
   AdminCaseDetailResponse,
   AdminCasesResponse,
+  AdminExportHistoryResponse,
   AdminFileDeletionResponse,
   AdminFilesResponse,
   AdminIdentity,
   AdminOverviewResponse,
+  AdminSelfCheckResponse,
   AdminSessionInfo,
   AdminSessionsResponse,
+  AdminSystemHealthResponse,
   AdminUsersResponse,
   SafeBrowsePage,
 } from '../types'
@@ -27,6 +32,20 @@ export const adminAuthAPI = {
     }>('/auth/login', {
       method: 'POST',
       body: { email, password },
+      auth: false,
+      redirectOn401: false,
+    })
+  },
+
+  async loginWithTotp(email: string, password: string, totpCode: string) {
+    return adminApiClient.request<{
+      accessToken: string
+      expiresAt: string | null
+      session: AdminSessionInfo | null
+      admin: AdminIdentity
+    }>('/auth/login', {
+      method: 'POST',
+      body: { email, password, totpCode },
       auth: false,
       redirectOn401: false,
     })
@@ -52,6 +71,18 @@ export const adminAuthAPI = {
 
   async getMe() {
     return adminApiClient.request<AdminIdentity>('/auth/me')
+  },
+
+  async reauthenticate(password: string, totpCode?: string) {
+    return adminApiClient.request<{
+      message: string
+      accessToken: string
+      expiresAt: string | null
+      session: AdminSessionInfo | null
+    }>('/auth/re-auth', {
+      method: 'POST',
+      body: { password, totpCode },
+    })
   },
 }
 
@@ -126,6 +157,91 @@ const downloadAdminCsv = async (
 }
 
 export const adminConsoleAPI = {
+  async getSystemHealth() {
+    return adminApiClient.request<AdminSystemHealthResponse>('/system/health')
+  },
+
+  async runSystemSelfCheck() {
+    return adminApiClient.request<AdminSelfCheckResponse>('/system/self-check', {
+      method: 'POST',
+    })
+  },
+
+  async getAlerts() {
+    return adminApiClient.request<AdminAlertsResponse>('/alerts')
+  },
+
+  async acknowledgeAlert(alertId: string, note: string) {
+    return adminApiClient.request<AdminAlertAcknowledgementResponse>(`/alerts/${encodeURIComponent(alertId)}/acknowledge`, {
+      method: 'POST',
+      body: { note },
+    })
+  },
+
+  async getExportHistory(limit = 25) {
+    const query = buildSearchParams({ limit })
+    return adminApiClient.request<AdminExportHistoryResponse>(`/exports/history?${query}`)
+  },
+
+  async exportOverview(reason: string) {
+    return downloadAdminCsv('/exports/overview', { reason }, 'admin-overview.csv')
+  },
+
+  async exportActivity(
+    filters: {
+      page?: number
+      limit?: number
+      source?: string
+      actorType?: string
+      actor?: string
+      action?: string
+      resourceType?: string
+      resourceId?: string
+      caseId?: string
+      sessionId?: string
+      ipAddress?: string
+      dateFrom?: string
+      dateTo?: string
+      q?: string
+      reason?: string
+    } = {}
+  ) {
+    return downloadAdminCsv('/exports/activity', filters, 'admin-activity.csv')
+  },
+
+  async exportCasesFromCenter(
+    filters: {
+      q?: string
+      status?: string
+      priority?: string
+      evidenceLocked?: boolean | string
+      owner?: string
+      assignedOfficer?: string
+      updatedFrom?: string
+      updatedTo?: string
+      minRecentActivity?: number | string
+      reason?: string
+    } = {}
+  ) {
+    return downloadAdminCsv('/exports/cases', filters, 'admin-cases.csv')
+  },
+
+  async exportFilesFromCenter(
+    filters: {
+      q?: string
+      caseId?: string | number
+      fileType?: string
+      parseStatus?: string
+      classificationResult?: string
+      uploader?: string
+      dateFrom?: string
+      dateTo?: string
+      reason?: string
+    } = {}
+  ) {
+    return downloadAdminCsv('/exports/files', filters, 'admin-files.csv')
+  },
+
   async getOverview() {
     return adminApiClient.request<AdminOverviewResponse>('/overview')
   },
