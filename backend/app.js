@@ -5,7 +5,7 @@ import cookieParser from 'cookie-parser';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { authRateLimit, rateLimit } from './middleware/rateLimit.js';
+import { adminAuthRateLimit, authRateLimit, rateLimit } from './middleware/rateLimit.js';
 import { auditLogger } from './middleware/auditLogger.js';
 import { globalErrorHandler } from './middleware/errorHandler.js';
 import { getLiveHealth, getReadyHealth, getStartupStatus } from './services/runtimeStatus.service.js';
@@ -25,6 +25,9 @@ import officerRoutes from './routes/officerImport.js';
 import chatbotRoutes from './routes/chatbot.js';
 import osintRoutes from './routes/osint.js';
 import systemRoutes from './routes/system.js';
+import adminAuthRoutes from './routes/admin/auth.js';
+import adminConsoleRoutes from './routes/admin/console.js';
+import { adminOriginGuard } from './middleware/admin/adminOriginGuard.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -83,7 +86,11 @@ export const createApp = () => {
 
   app.use('/api/auth/login', authRateLimit);
   app.use('/api/auth/signup', authRateLimit);
+  app.use('/api/admin/auth/login', adminAuthRateLimit);
   app.use('/api/auth', authRoutes);
+  app.use('/api/admin', adminOriginGuard);
+  app.use('/api/admin/auth', adminAuthRoutes);
+  app.use('/api/admin', rateLimit, adminConsoleRoutes);
   app.use('/api/cases', rateLimit, casesRoutes);
   app.use('/api/files', rateLimit, filesRoutes);
   app.use('/api/dashboard', rateLimit, dashboardRoutes);

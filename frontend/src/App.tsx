@@ -6,6 +6,8 @@ import { lazy, Suspense, useEffect } from 'react'
 
 import ProtectedRoute from './components/ProtectedRoute'
 import AuthenticatedLayout from './components/AuthenticatedLayout'
+import AdminProtectedRoute from './admin/components/AdminProtectedRoute'
+import AdminLayout from './admin/layout/AdminLayout'
 
 const LandingPage = lazy(() => import('./pages/LandingPage'))
 const LoginPage = lazy(() => import('./pages/LoginPage'))
@@ -15,6 +17,9 @@ const CaseView = lazy(() => import('./pages/CaseView'))
 const CreateCasePage = lazy(() => import('./pages/CreateCasePage'))
 const SettingsPage = lazy(() => import('./pages/SettingsPage').then((m) => ({ default: m.Settings })))
 const OSINTTools = lazy(() => import('./components/osint/OSINT').then((m) => ({ default: m.OSINTTools })))
+const AdminLoginPage = lazy(() => import('./admin/pages/AdminLoginPage'))
+const AdminOverviewPage = lazy(() => import('./admin/pages/AdminOverviewPage'))
+const AdminPlaceholderPage = lazy(() => import('./admin/pages/AdminPlaceholderPage'))
 
 function RouteLoadingShell({ label }: { label: string }) {
   return (
@@ -84,6 +89,7 @@ function App() {
         <Route path="/" element={<LandingPage />} />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/signup" element={<SignUpPage />} />
+        <Route path="/admin/login" element={<AdminLoginPage />} />
 
         {/* Protected routes (wrapped in Navbar layout) */}
         <Route element={<ProtectedRoute />}>
@@ -94,6 +100,36 @@ function App() {
             <Route path="/case/:id/:dataType" element={<CaseView />} />
             <Route path="/settings" element={<SettingsPage />} />
             <Route path="/osint" element={<OSINTTools />} />
+          </Route>
+        </Route>
+
+        <Route element={<AdminProtectedRoute />}>
+          <Route element={<AdminLayout />}>
+            <Route path="/admin" element={<AdminOverviewPage />} />
+            <Route
+              path="/admin/activity"
+              element={<AdminPlaceholderPage title="Activity Feed" description="This module will become the global admin event timeline in phase 2, powered by audit logs, sessions, and live event updates." />}
+            />
+            <Route
+              path="/admin/users"
+              element={<AdminPlaceholderPage title="Users & Sessions" description="This module will become the admin view for officer usage, active sessions, failed logins, and session revocation in phase 2." />}
+            />
+            <Route
+              path="/admin/cases"
+              element={<AdminPlaceholderPage title="Cases" description="This module will become the operational case governance surface with assignments, evidence locks, and activity links in phase 3." />}
+            />
+            <Route
+              path="/admin/files"
+              element={<AdminPlaceholderPage title="Files" description="This module will become the central file governance workspace for uploads, deletions, parse failures, and telecom-module traceability in phase 3." />}
+            />
+            <Route
+              path="/admin/database"
+              element={<AdminPlaceholderPage title="Database Explorer" description="This module will become the safe schema and table browser in phase 4, without exposing arbitrary SQL execution." />}
+            />
+            <Route
+              path="/admin/system"
+              element={<AdminPlaceholderPage title="System Operations" description="This module will become the health, self-check, backups, alerts, and production operations workspace in phase 5." />}
+            />
           </Route>
         </Route>
       </Routes>

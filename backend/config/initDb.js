@@ -18,20 +18,20 @@ const findFile = (filename) => {
   return candidates.find(p => fs.existsSync(p)) || null;
 };
 
+const REQUIRED_TABLES = ['cases', 'admin_accounts'];
+
 /**
- * Check if core tables exist in the database.
- * Returns true if the 'cases' table exists (indicating schema was applied).
+ * Check if core and admin tables exist in the database.
  */
 const checkTablesExist = async () => {
   try {
     const result = await pool.query(`
-      SELECT EXISTS (
-        SELECT FROM information_schema.tables 
-        WHERE table_schema = 'public' 
-        AND table_name = 'cases'
-      ) AS tables_exist
-    `);
-    return result.rows[0]?.tables_exist === true;
+      SELECT COUNT(*)::int AS table_count
+      FROM information_schema.tables
+      WHERE table_schema = 'public'
+        AND table_name = ANY($1::text[])
+    `, [REQUIRED_TABLES]);
+    return result.rows[0]?.table_count === REQUIRED_TABLES.length;
   } catch (err) {
     console.error('[initDb] Error checking tables:', err.message);
     return false;

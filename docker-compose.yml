@@ -45,11 +45,17 @@ services:
       DB_USER: ${DB_USER:-shakti_admin}
       DB_PASSWORD: ${DB_PASSWORD:-localdevpassword}
       JWT_SECRET: ${JWT_SECRET}
+      JWT_ADMIN_SECRET: ${JWT_ADMIN_SECRET:-}
       JWT_ACCESS_EXPIRY: ${JWT_ACCESS_EXPIRY:-15m}
       JWT_REFRESH_EXPIRY_DAYS: ${JWT_REFRESH_EXPIRY_DAYS:-7}
       REFRESH_COOKIE_NAME: ${REFRESH_COOKIE_NAME:-shakti_refresh}
       REFRESH_COOKIE_SAMESITE: ${REFRESH_COOKIE_SAMESITE:-lax}
       REFRESH_COOKIE_SECURE: ${REFRESH_COOKIE_SECURE:-false}
+      JWT_ADMIN_ACCESS_EXPIRY: ${JWT_ADMIN_ACCESS_EXPIRY:-10m}
+      JWT_ADMIN_REFRESH_EXPIRY_DAYS: ${JWT_ADMIN_REFRESH_EXPIRY_DAYS:-7}
+      ADMIN_REFRESH_COOKIE_NAME: ${ADMIN_REFRESH_COOKIE_NAME:-shakti_admin_refresh}
+      ADMIN_REFRESH_COOKIE_SAMESITE: ${ADMIN_REFRESH_COOKIE_SAMESITE:-strict}
+      ADMIN_REFRESH_COOKIE_SECURE: ${ADMIN_REFRESH_COOKIE_SECURE:-false}
       BCRYPT_ROUNDS: ${BCRYPT_ROUNDS:-12}
       OLLAMA_BASE_URL: http://host.docker.internal:11434
       OLLAMA_URL: http://host.docker.internal:11434
@@ -59,6 +65,7 @@ services:
       UPLOAD_DIR: /app/uploads
       MAX_FILE_SIZE: ${MAX_FILE_SIZE:-52428800}
       CHATBOT_DIAGNOSTICS_ENABLED: ${CHATBOT_DIAGNOSTICS_ENABLED:-true}
+      ADMIN_ALLOWED_ORIGINS: ${ADMIN_ALLOWED_ORIGINS:-http://localhost:5173,http://localhost:3000}
       BACKUP_STATUS_FILE: /app/runtime/backup-status.json
       RESTORE_STATUS_FILE: /app/runtime/restore-status.json
     ports:
@@ -66,6 +73,7 @@ services:
     volumes:
       - upload_data:/app/uploads
       - ./ops:/app/ops
+      - ./database:/app/database:ro
     depends_on:
       postgres:
         condition: service_healthy

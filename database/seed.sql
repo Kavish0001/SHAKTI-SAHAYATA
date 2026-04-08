@@ -27,3 +27,13 @@ ON CONFLICT (buckle_id) DO UPDATE SET
     full_name = EXCLUDED.full_name,
     role = EXCLUDED.role,
     updated_at = NOW();
+
+-- 3. Seed internal IT admin account (password: Shakti@123)
+INSERT INTO admin_accounts (email, password_hash, full_name, role, permissions) VALUES
+    ('it.admin@police.gov.in', '$2a$12$QarFNbW.z.vtz2vywPNWjuF7WUJjpf0q0C26Vcw72oy16s5nZANFG', 'IT Department Admin', 'it_admin', '["console_access"]'::jsonb)
+ON CONFLICT (email) DO UPDATE SET
+    password_hash = EXCLUDED.password_hash,
+    full_name = EXCLUDED.full_name,
+    role = EXCLUDED.role,
+    permissions = EXCLUDED.permissions,
+    updated_at = NOW();

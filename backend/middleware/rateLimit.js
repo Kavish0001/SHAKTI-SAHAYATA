@@ -5,6 +5,7 @@ const MAX_REQUESTS = parseInt(
   process.env.GENERAL_RATE_LIMIT_MAX_REQUESTS || process.env.RATE_LIMIT_MAX_REQUESTS || '500'
 );
 const AUTH_MAX_REQUESTS = parseInt(process.env.AUTH_RATE_LIMIT_MAX_REQUESTS || '10');
+const ADMIN_AUTH_MAX_REQUESTS = parseInt(process.env.ADMIN_AUTH_RATE_LIMIT_MAX_REQUESTS || '10');
 
 const createLimiter = ({
   max,
@@ -38,5 +39,14 @@ export const authRateLimit = createLimiter({
   message: {
     error: 'Too many authentication attempts. Please wait 15 minutes.',
     code: 'AUTH_RATE_LIMIT',
+  },
+});
+
+export const adminAuthRateLimit = createLimiter({
+  windowMs: 15 * 60 * 1000,
+  max: ADMIN_AUTH_MAX_REQUESTS,
+  message: {
+    error: 'Too many admin authentication attempts. Please wait 15 minutes.',
+    code: 'ADMIN_AUTH_RATE_LIMIT',
   },
 });

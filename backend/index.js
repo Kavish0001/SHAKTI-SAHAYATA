@@ -51,7 +51,8 @@ export const startServer = async () => {
     Startup Degraded: ${currentStartupStatus.summary?.degraded?.join(', ') || 'none'}
     Routes: auth, cases, files, dashboard,
             cdr, ipdr, sdr, tower, ild,
-            audit, settings, chatbot, osint, system
+            audit, settings, chatbot, osint, system,
+            admin/auth
   =============================================
     `);
   });

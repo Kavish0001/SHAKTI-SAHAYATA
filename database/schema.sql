@@ -518,7 +518,82 @@ CREATE INDEX IF NOT EXISTS idx_archived_cases_number ON archived_cases(case_numb
 CREATE INDEX IF NOT EXISTS idx_archived_cases_date ON archived_cases(archived_at);
 
 -- ============================================================
--- 021: app_settings
+-- 021: admin_accounts
+-- ============================================================
+CREATE TABLE IF NOT EXISTS admin_accounts (
+    id                      SERIAL PRIMARY KEY,
+    email                   VARCHAR(255) UNIQUE NOT NULL,
+    password_hash           VARCHAR(255) NOT NULL,
+    full_name               VARCHAR(255) NOT NULL,
+    role                    VARCHAR(30) NOT NULL DEFAULT 'it_admin'
+                            CHECK (role IN ('it_admin', 'it_auditor')),
+    permissions             JSONB NOT NULL DEFAULT '["console_access"]'::jsonb,
+    failed_login_attempts   INTEGER DEFAULT 0,
+    locked_until            TIMESTAMPTZ,
+    last_login              TIMESTAMPTZ,
+    last_password_change    TIMESTAMPTZ DEFAULT NOW(),
+    is_active               BOOLEAN DEFAULT TRUE,
+    created_at              TIMESTAMPTZ DEFAULT NOW(),
+    updated_at              TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_admin_accounts_email ON admin_accounts(email);
+
+-- ============================================================
+-- 022: admin_refresh_tokens
+-- ============================================================
+CREATE TABLE IF NOT EXISTS admin_refresh_tokens (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    admin_account_id    INTEGER NOT NULL REFERENCES admin_accounts(id) ON DELETE CASCADE,
+    token_hash          VARCHAR(128) NOT NULL,
+    family_id           UUID NOT NULL,
+    is_revoked          BOOLEAN DEFAULT FALSE,
+    created_at          TIMESTAMPTZ DEFAULT NOW(),
+    expires_at          TIMESTAMPTZ NOT NULL,
+    replaced_by         UUID REFERENCES admin_refresh_tokens(id),
+    ip_address          INET,
+    user_agent          TEXT,
+    CONSTRAINT unique_admin_token_hash UNIQUE (token_hash)
+);
+CREATE INDEX IF NOT EXISTS idx_admin_refresh_tokens_account ON admin_refresh_tokens(admin_account_id);
+CREATE INDEX IF NOT EXISTS idx_admin_refresh_tokens_family ON admin_refresh_tokens(family_id);
+CREATE INDEX IF NOT EXISTS idx_admin_refresh_tokens_expiry ON admin_refresh_tokens(expires_at) WHERE NOT is_revoked;
+
+-- ============================================================
+-- 023: admin_sessions
+-- ============================================================
+CREATE TABLE IF NOT EXISTS admin_sessions (
+    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    admin_account_id    INTEGER NOT NULL REFERENCES admin_accounts(id) ON DELETE CASCADE,
+    started_at          TIMESTAMPTZ DEFAULT NOW(),
+    ended_at            TIMESTAMPTZ,
+    ip_address          INET,
+    user_agent          TEXT,
+    logout_reason       VARCHAR(50)
+                        CHECK (logout_reason IN ('manual', 'expired', 'admin_forced', 'lockout'))
+);
+CREATE INDEX IF NOT EXISTS idx_admin_sessions_account ON admin_sessions(admin_account_id);
+CREATE INDEX IF NOT EXISTS idx_admin_sessions_active ON admin_sessions(admin_account_id) WHERE ended_at IS NULL;
+
+-- ============================================================
+-- 024: admin_action_logs
+-- ============================================================
+CREATE TABLE IF NOT EXISTS admin_action_logs (
+    id                  SERIAL PRIMARY KEY,
+    admin_account_id    INTEGER REFERENCES admin_accounts(id) ON DELETE SET NULL,
+    session_id          TEXT,
+    action              TEXT NOT NULL,
+    resource_type       TEXT,
+    resource_id         TEXT,
+    details             JSONB,
+    ip_address          INET,
+    created_at          TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_admin_action_logs_account ON admin_action_logs(admin_account_id);
+CREATE INDEX IF NOT EXISTS idx_admin_action_logs_action ON admin_action_logs(action);
+CREATE INDEX IF NOT EXISTS idx_admin_action_logs_created ON admin_action_logs(created_at);
+
+-- ============================================================
+-- 025: app_settings
 -- ============================================================
 CREATE TABLE IF NOT EXISTS app_settings (
     id          SERIAL PRIMARY KEY,
