@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { AlertTriangle, Search } from 'lucide-react'
+import { useSearchParams } from 'react-router-dom'
 import type { ActivityEvent } from '../types'
 import { adminConsoleAPI } from '../lib/api'
 import { Button } from '@/components/ui/button'
@@ -48,7 +49,15 @@ const toEndOfDayIso = (value: string) => {
 }
 
 export default function AdminActivityPage() {
-  const [filters, setFilters] = useState(emptyFilters)
+  const [searchParams] = useSearchParams()
+  const [filters, setFilters] = useState(() => ({
+    ...emptyFilters,
+    q: searchParams.get('q') || '',
+    resourceType: searchParams.get('resourceType') || '',
+    caseId: searchParams.get('caseId') || '',
+    resourceId: searchParams.get('resourceId') || '',
+    sessionId: searchParams.get('sessionId') || '',
+  }))
   const [page, setPage] = useState(1)
   const [selectedEvent, setSelectedEvent] = useState<ActivityEvent | null>(null)
 

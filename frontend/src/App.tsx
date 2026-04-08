@@ -21,6 +21,8 @@ const AdminLoginPage = lazy(() => import('./admin/pages/AdminLoginPage'))
 const AdminOverviewPage = lazy(() => import('./admin/pages/AdminOverviewPage'))
 const AdminActivityPage = lazy(() => import('./admin/pages/AdminActivityPage'))
 const AdminUsersPage = lazy(() => import('./admin/pages/AdminUsersPage'))
+const AdminCasesPage = lazy(() => import('./admin/pages/AdminCasesPage'))
+const AdminFilesPage = lazy(() => import('./admin/pages/AdminFilesPage'))
 const AdminPlaceholderPage = lazy(() => import('./admin/pages/AdminPlaceholderPage'))
 
 function RouteLoadingShell({ label }: { label: string }) {
@@ -110,14 +112,8 @@ function App() {
             <Route path="/admin" element={<AdminOverviewPage />} />
             <Route path="/admin/activity" element={<AdminActivityPage />} />
             <Route path="/admin/users" element={<AdminUsersPage />} />
-            <Route
-              path="/admin/cases"
-              element={<AdminPlaceholderPage title="Cases" description="This module will become the operational case governance surface with assignments, evidence locks, and activity links in phase 3." />}
-            />
-            <Route
-              path="/admin/files"
-              element={<AdminPlaceholderPage title="Files" description="This module will become the central file governance workspace for uploads, deletions, parse failures, and telecom-module traceability in phase 3." />}
-            />
+            <Route path="/admin/cases" element={<AdminCasesPage />} />
+            <Route path="/admin/files" element={<AdminFilesPage />} />
             <Route
               path="/admin/database"
               element={<AdminPlaceholderPage title="Database Explorer" description="This module will become the safe schema and table browser in phase 4, without exposing arbitrary SQL execution." />}

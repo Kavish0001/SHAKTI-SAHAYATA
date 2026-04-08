@@ -4,6 +4,16 @@ import { authenticateAdminToken } from '../../middleware/admin/authenticateAdmin
 import { requireAdminRole } from '../../middleware/admin/authorizeAdmin.js';
 import { getLiveHealth, getReadyHealth, getStartupStatus } from '../../services/runtimeStatus.service.js';
 import { logAdminAction } from '../../services/admin/adminAudit.service.js';
+import {
+  exportAdminCases,
+  exportAdminFileDeletions,
+  exportAdminFiles,
+  fetchAdminAnalysis,
+  fetchAdminCaseDetail,
+  fetchAdminCases,
+  fetchAdminFileDeletions,
+  fetchAdminFiles,
+} from '../../services/admin/adminGovernance.service.js';
 
 const router = Router();
 
@@ -17,6 +27,35 @@ const parsePositiveInt = (value, fallback) => {
   const parsed = Number.parseInt(String(value ?? ''), 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 };
+
+const buildCsvValue = (value) => {
+  if (value === null || value === undefined) return '';
+  const text = typeof value === 'object' ? JSON.stringify(value) : String(value);
+  return `"${text.replace(/"/g, '""')}"`;
+};
+
+const buildCsv = (columns, rows) => {
+  const header = columns.map((column) => buildCsvValue(column.label)).join(',');
+  const body = rows.map((row) => columns.map((column) => buildCsvValue(column.value(row))).join(','));
+  return [header, ...body].join('\r\n');
+};
+
+const createCsvFilename = (prefix) =>
+  `${prefix}-${new Date().toISOString().replace(/[:.]/g, '-').replace('T', '_')}.csv`;
+
+const sendCsv = (res, filename, csv) => {
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.status(200).send(csv);
+};
+
+const joinAssignedOfficers = (assignedOfficers) =>
+  Array.isArray(assignedOfficers)
+    ? assignedOfficers
+      .map((officer) => [officer?.fullName, officer?.buckleId, officer?.role].filter(Boolean).join(' '))
+      .filter(Boolean)
+      .join(' | ')
+    : '';
 
 const buildActivityWhereClause = (query = {}) => {
   const clauses = [];
@@ -42,7 +81,14 @@ const buildActivityWhereClause = (query = {}) => {
   if (query.action) addClause('action = ?', String(query.action).trim());
   if (query.resourceType) addClause('resource_type = ?', String(query.resourceType).trim());
   if (query.resourceId) addClause('resource_id = ?', String(query.resourceId).trim());
-  if (query.caseId) addClause("resource_id = ? AND resource_type = 'case'", String(query.caseId).trim());
+  if (query.caseId) {
+    params.push(String(query.caseId).trim());
+    const index = `$${params.length}`;
+    clauses.push(`(
+      (resource_type = 'case' AND resource_id = ${index})
+      OR COALESCE(details->>'caseId', '') = ${index}
+    )`);
+  }
   if (query.sessionId) addClause('session_id = ?', String(query.sessionId).trim());
   if (query.ipAddress) addClause("COALESCE(ip_address, '') ILIKE ?", `%${String(query.ipAddress).trim()}%`);
   if (query.dateFrom) addClause('created_at >= ?::timestamptz', String(query.dateFrom).trim());
@@ -435,6 +481,182 @@ router.get('/sessions', async (req, res) => {
   } catch (error) {
     console.error('[ADMIN] Sessions error:', error);
     res.status(500).json({ error: 'Failed to load admin sessions view' });
+  }
+});
+
+router.get('/cases', async (req, res) => {
+  try {
+    const payload = await fetchAdminCases(req.query);
+    res.json(payload);
+  } catch (error) {
+    console.error('[ADMIN] Cases error:', error);
+    res.status(500).json({ error: 'Failed to load admin cases view' });
+  }
+});
+
+router.get('/cases/export', async (req, res) => {
+  try {
+    const rows = await exportAdminCases(req.query);
+    await logAdminAction({
+      adminAccountId: req.admin.adminId,
+      action: 'EXPORT_CASE_GOVERNANCE',
+      resourceType: 'case',
+      resourceId: null,
+      ipAddress: req.ip,
+      details: { filters: req.query, exportedCount: rows.length },
+    });
+
+    const csv = buildCsv(
+      [
+        { label: 'Case ID', value: (row) => row.id },
+        { label: 'Case Name', value: (row) => row.case_name },
+        { label: 'Case Number', value: (row) => row.case_number },
+        { label: 'FIR Number', value: (row) => row.fir_number },
+        { label: 'Operator', value: (row) => row.operator },
+        { label: 'Status', value: (row) => row.status },
+        { label: 'Priority', value: (row) => row.priority },
+        { label: 'Evidence Locked', value: (row) => row.is_evidence_locked },
+        { label: 'Owner', value: (row) => row.owner_name },
+        { label: 'Owner Buckle ID', value: (row) => row.owner_buckle_id },
+        { label: 'Assignments', value: (row) => row.assignment_count },
+        { label: 'Assigned Officers', value: (row) => joinAssignedOfficers(row.assigned_officers) },
+        { label: 'File Count', value: (row) => row.file_count },
+        { label: 'Failed Parse Files', value: (row) => row.failed_parse_files },
+        { label: 'Pending Files', value: (row) => row.pending_files },
+        { label: 'Recent Activity', value: (row) => row.recent_activity_count },
+        { label: 'Last Activity At', value: (row) => row.last_activity_at },
+        { label: 'Updated At', value: (row) => row.updated_at },
+      ],
+      rows
+    );
+
+    return sendCsv(res, createCsvFilename('admin-case-governance'), csv);
+  } catch (error) {
+    console.error('[ADMIN] Cases export error:', error);
+    return res.status(500).json({ error: 'Failed to export case governance view' });
+  }
+});
+
+router.get('/cases/:caseId', async (req, res) => {
+  try {
+    const payload = await fetchAdminCaseDetail(req.params.caseId);
+    if (!payload) {
+      return res.status(404).json({ error: 'Case not found' });
+    }
+    return res.json(payload);
+  } catch (error) {
+    console.error('[ADMIN] Case detail error:', error);
+    return res.status(500).json({ error: 'Failed to load admin case detail' });
+  }
+});
+
+router.get('/files', async (req, res) => {
+  try {
+    const payload = await fetchAdminFiles(req.query);
+    res.json(payload);
+  } catch (error) {
+    console.error('[ADMIN] Files error:', error);
+    res.status(500).json({ error: 'Failed to load admin files view' });
+  }
+});
+
+router.get('/files/export', async (req, res) => {
+  try {
+    const rows = await exportAdminFiles(req.query);
+    await logAdminAction({
+      adminAccountId: req.admin.adminId,
+      action: 'EXPORT_FILE_GOVERNANCE',
+      resourceType: 'file',
+      resourceId: null,
+      ipAddress: req.ip,
+      details: { filters: req.query, exportedCount: rows.length },
+    });
+
+    const csv = buildCsv(
+      [
+        { label: 'File ID', value: (row) => row.id },
+        { label: 'Original Name', value: (row) => row.original_name },
+        { label: 'Stored Name', value: (row) => row.file_name },
+        { label: 'Case ID', value: (row) => row.case_id },
+        { label: 'Case Name', value: (row) => row.case_name },
+        { label: 'Case Number', value: (row) => row.case_number },
+        { label: 'Case Status', value: (row) => row.case_status },
+        { label: 'Case Priority', value: (row) => row.case_priority },
+        { label: 'Evidence Locked', value: (row) => row.is_evidence_locked },
+        { label: 'Telecom Module', value: (row) => row.telecom_module },
+        { label: 'Parse Status', value: (row) => row.parse_status },
+        { label: 'Classification Result', value: (row) => row.classification_result },
+        { label: 'Record Count', value: (row) => row.record_count },
+        { label: 'Uploader', value: (row) => row.uploaded_by_name },
+        { label: 'Uploader Buckle ID', value: (row) => row.uploaded_by_buckle_id },
+        { label: 'Uploaded At', value: (row) => row.uploaded_at },
+        { label: 'Error Message', value: (row) => row.error_message },
+      ],
+      rows
+    );
+
+    return sendCsv(res, createCsvFilename('admin-file-governance'), csv);
+  } catch (error) {
+    console.error('[ADMIN] Files export error:', error);
+    return res.status(500).json({ error: 'Failed to export file governance view' });
+  }
+});
+
+router.get('/files/deletions', async (req, res) => {
+  try {
+    const payload = await fetchAdminFileDeletions(req.query);
+    res.json(payload);
+  } catch (error) {
+    console.error('[ADMIN] File deletions error:', error);
+    res.status(500).json({ error: 'Failed to load file deletion traceability' });
+  }
+});
+
+router.get('/files/deletions/export', async (req, res) => {
+  try {
+    const rows = await exportAdminFileDeletions(req.query);
+    await logAdminAction({
+      adminAccountId: req.admin.adminId,
+      action: 'EXPORT_FILE_DELETION_TRACE',
+      resourceType: 'file',
+      resourceId: null,
+      ipAddress: req.ip,
+      details: { filters: req.query, exportedCount: rows.length },
+    });
+
+    const csv = buildCsv(
+      [
+        { label: 'Audit ID', value: (row) => row.audit_id },
+        { label: 'Deleted At', value: (row) => row.created_at },
+        { label: 'Actor', value: (row) => row.actor_name },
+        { label: 'Actor Email', value: (row) => row.actor_email },
+        { label: 'Actor Buckle ID', value: (row) => row.actor_buckle_id },
+        { label: 'Case ID', value: (row) => row.case_id },
+        { label: 'Case Name', value: (row) => row.case_name },
+        { label: 'Case Number', value: (row) => row.case_number },
+        { label: 'File Name', value: (row) => row.file_name },
+        { label: 'Stored File Name', value: (row) => row.stored_file_name },
+        { label: 'Deleted Type', value: (row) => row.deleted_type },
+        { label: 'Deleted Records', value: (row) => row.deleted_records },
+        { label: 'IP Address', value: (row) => row.ip_address },
+      ],
+      rows
+    );
+
+    return sendCsv(res, createCsvFilename('admin-file-deletions'), csv);
+  } catch (error) {
+    console.error('[ADMIN] File deletions export error:', error);
+    return res.status(500).json({ error: 'Failed to export file deletion traceability' });
+  }
+});
+
+router.get('/analysis', async (_req, res) => {
+  try {
+    const payload = await fetchAdminAnalysis();
+    res.json(payload);
+  } catch (error) {
+    console.error('[ADMIN] Analysis error:', error);
+    res.status(500).json({ error: 'Failed to load admin analysis view' });
   }
 });
 

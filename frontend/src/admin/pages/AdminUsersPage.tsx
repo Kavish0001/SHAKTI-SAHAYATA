@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, LogOut, ShieldCheck, Users } from 'lucide-react'
-import { useNavigate } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { toast } from 'sonner'
 import type { AdminSessionRow } from '../types'
 import { adminConsoleAPI } from '../lib/api'
@@ -308,16 +308,24 @@ export default function AdminUsersPage() {
                           </div>
                         </td>
                         <td className="px-4 py-4 text-right">
-                          <Button
-                            type="button"
-                            variant="destructive"
-                            size="sm"
-                            disabled={Boolean(session.ended_at)}
-                            onClick={() => setTargetSession(session)}
-                          >
-                            <LogOut className="h-3.5 w-3.5" />
-                            Force Logout
-                          </Button>
+                          <div className="flex flex-col items-end gap-2">
+                            <Link
+                              to={`/admin/activity?sessionId=${encodeURIComponent(session.id)}`}
+                              className="text-xs font-medium text-blue-700 hover:underline dark:text-blue-300"
+                            >
+                              Open activity
+                            </Link>
+                            <Button
+                              type="button"
+                              variant="destructive"
+                              size="sm"
+                              disabled={Boolean(session.ended_at)}
+                              onClick={() => setTargetSession(session)}
+                            >
+                              <LogOut className="h-3.5 w-3.5" />
+                              Force Logout
+                            </Button>
+                          </div>
                         </td>
                       </tr>
                     ))
@@ -352,6 +360,14 @@ export default function AdminUsersPage() {
                     <div className="mt-1 text-muted-foreground">{targetSession.actor_email}</div>
                     <div className="mt-2 text-xs text-muted-foreground">
                       Started {formatTimestamp(targetSession.started_at)} • {targetSession.ip_address || 'No IP'}
+                    </div>
+                    <div className="mt-3">
+                      <Link
+                        to={`/admin/activity?sessionId=${encodeURIComponent(targetSession.id)}`}
+                        className="text-xs font-medium text-blue-700 hover:underline dark:text-blue-300"
+                      >
+                        Open this session in activity feed
+                      </Link>
                     </div>
                   </div>
                 </div>

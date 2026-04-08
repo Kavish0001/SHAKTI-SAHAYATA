@@ -1,6 +1,12 @@
-import { adminApiClient } from './adminApiClient'
+import { ApiError, resolveBackendBaseUrl } from '../../lib/apiClient'
+import { adminApiClient, getAdminAccessToken } from './adminApiClient'
 import type {
   ActivityFeedResponse,
+  AdminAnalysisResponse,
+  AdminCaseDetailResponse,
+  AdminCasesResponse,
+  AdminFileDeletionResponse,
+  AdminFilesResponse,
   AdminIdentity,
   AdminOverviewResponse,
   AdminSessionInfo,
@@ -56,6 +62,66 @@ const buildSearchParams = (params: Record<string, string | number | boolean | un
   return search.toString()
 }
 
+const readErrorMessage = async (response: Response) => {
+  const raw = await response.text()
+  if (!raw) return `Request failed with status ${response.status}`
+
+  try {
+    const parsed = JSON.parse(raw) as { error?: string }
+    return parsed.error || raw
+  } catch {
+    return raw
+  }
+}
+
+const extractFilename = (response: Response, fallback: string) => {
+  const disposition = response.headers.get('content-disposition') || ''
+  const match = disposition.match(/filename="([^"]+)"/i)
+  return match?.[1] || fallback
+}
+
+const downloadAdminCsv = async (
+  endpoint: string,
+  params: Record<string, string | number | boolean | undefined | null>,
+  fallbackFilename: string
+) => {
+  const query = buildSearchParams(params)
+  const requestUrl = `${resolveBackendBaseUrl()}/api/admin${endpoint}${query ? `?${query}` : ''}`
+
+  const runDownload = async (allowRefresh: boolean): Promise<void> => {
+    const token = getAdminAccessToken()
+    const response = await fetch(requestUrl, {
+      method: 'GET',
+      credentials: 'include',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    })
+
+    if (response.status === 401 && allowRefresh) {
+      const refreshed = await adminApiClient.refreshAccessToken(true)
+      if (refreshed) {
+        return runDownload(false)
+      }
+      throw new ApiError('Admin session expired. Please sign in again.', 401)
+    }
+
+    if (!response.ok) {
+      throw new ApiError(await readErrorMessage(response), response.status)
+    }
+
+    const blob = await response.blob()
+    const downloadUrl = window.URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = downloadUrl
+    anchor.download = extractFilename(response, fallbackFilename)
+    document.body.appendChild(anchor)
+    anchor.click()
+    anchor.remove()
+    window.URL.revokeObjectURL(downloadUrl)
+  }
+
+  return runDownload(true)
+}
+
 export const adminConsoleAPI = {
   async getOverview() {
     return adminApiClient.request<AdminOverviewResponse>('/overview')
@@ -98,5 +164,98 @@ export const adminConsoleAPI = {
         body: { sessionType, reason },
       }
     )
+  },
+
+  async getCases(filters: {
+    page?: number
+    limit?: number
+    q?: string
+    status?: string
+    priority?: string
+    evidenceLocked?: boolean | string
+    owner?: string
+    assignedOfficer?: string
+    updatedFrom?: string
+    updatedTo?: string
+    minRecentActivity?: number | string
+  } = {}) {
+    const query = buildSearchParams(filters)
+    return adminApiClient.request<AdminCasesResponse>(`/cases${query ? `?${query}` : ''}`)
+  },
+
+  async exportCases(filters: {
+    q?: string
+    status?: string
+    priority?: string
+    evidenceLocked?: boolean | string
+    owner?: string
+    assignedOfficer?: string
+    updatedFrom?: string
+    updatedTo?: string
+    minRecentActivity?: number | string
+  } = {}) {
+    return downloadAdminCsv('/cases/export', filters, 'admin-case-governance.csv')
+  },
+
+  async getCaseDetail(caseId: number | string) {
+    return adminApiClient.request<AdminCaseDetailResponse>(`/cases/${encodeURIComponent(String(caseId))}`)
+  },
+
+  async getFiles(filters: {
+    page?: number
+    limit?: number
+    q?: string
+    caseId?: string | number
+    fileType?: string
+    parseStatus?: string
+    classificationResult?: string
+    uploader?: string
+    dateFrom?: string
+    dateTo?: string
+  } = {}) {
+    const query = buildSearchParams(filters)
+    return adminApiClient.request<AdminFilesResponse>(`/files${query ? `?${query}` : ''}`)
+  },
+
+  async exportFiles(filters: {
+    q?: string
+    caseId?: string | number
+    fileType?: string
+    parseStatus?: string
+    classificationResult?: string
+    uploader?: string
+    dateFrom?: string
+    dateTo?: string
+  } = {}) {
+    return downloadAdminCsv('/files/export', filters, 'admin-file-governance.csv')
+  },
+
+  async getFileDeletions(filters: {
+    page?: number
+    limit?: number
+    q?: string
+    caseId?: string | number
+    deletedType?: string
+    actor?: string
+    dateFrom?: string
+    dateTo?: string
+  } = {}) {
+    const query = buildSearchParams(filters)
+    return adminApiClient.request<AdminFileDeletionResponse>(`/files/deletions${query ? `?${query}` : ''}`)
+  },
+
+  async exportFileDeletions(filters: {
+    q?: string
+    caseId?: string | number
+    deletedType?: string
+    actor?: string
+    dateFrom?: string
+    dateTo?: string
+  } = {}) {
+    return downloadAdminCsv('/files/deletions/export', filters, 'admin-file-deletions.csv')
+  },
+
+  async getAnalysis() {
+    return adminApiClient.request<AdminAnalysisResponse>('/analysis')
   },
 }

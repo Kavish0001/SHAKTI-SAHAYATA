@@ -110,6 +110,23 @@ describe('case lifecycle routes', () => {
     );
   });
 
+  it('records an audit event when a case is updated', async () => {
+    queryMock
+      .mockResolvedValueOnce({ rows: [{ id: 55, case_name: 'Updated Case' }] })
+      .mockResolvedValueOnce({ rows: [] });
+
+    const response = await request(app)
+      .put('/api/cases/55')
+      .send({ caseName: 'Updated Case', priority: 'high' });
+
+    expect(response.status).toBe(200);
+    expect(queryMock).toHaveBeenNthCalledWith(
+      2,
+      'INSERT INTO audit_logs (user_id, officer_buckle_id, action, resource_type, resource_id, details) VALUES ($1, $2, $3, $4, $5, $6)',
+      [7, 'BK-9999', 'UPDATE_CASE', 'case', '55', JSON.stringify({ updatedFields: ['caseName', 'priority'] })]
+    );
+  });
+
   it('deletes a case for owner-level access', async () => {
     queryMock
       .mockResolvedValueOnce({ rows: [{ id: 55 }] })
@@ -133,5 +150,39 @@ describe('case lifecycle routes', () => {
 
     expect(response.status).toBe(423);
     expect(queryMock).not.toHaveBeenCalled();
+  });
+
+  it('records a lock audit event when evidence locking a case', async () => {
+    queryMock
+      .mockResolvedValueOnce({ rows: [{ id: 55, is_evidence_locked: true }] })
+      .mockResolvedValueOnce({ rows: [] });
+
+    const response = await request(app)
+      .post('/api/cases/55/lock')
+      .send({ reason: 'Court hold' });
+
+    expect(response.status).toBe(200);
+    expect(queryMock).toHaveBeenNthCalledWith(
+      2,
+      'INSERT INTO audit_logs (user_id, officer_buckle_id, action, resource_type, resource_id, details) VALUES ($1, $2, $3, $4, $5, $6)',
+      [7, 'BK-9999', 'LOCK_CASE', 'case', '55', JSON.stringify({ reason: 'Court hold' })]
+    );
+  });
+
+  it('records an assignment audit event when assigning an officer', async () => {
+    queryMock
+      .mockResolvedValueOnce({ rows: [{ id: 4, case_id: 55, user_id: 9, role: 'investigator' }] })
+      .mockResolvedValueOnce({ rows: [] });
+
+    const response = await request(app)
+      .post('/api/cases/55/assignments')
+      .send({ userId: 9, role: 'investigator' });
+
+    expect(response.status).toBe(201);
+    expect(queryMock).toHaveBeenNthCalledWith(
+      2,
+      'INSERT INTO audit_logs (user_id, officer_buckle_id, action, resource_type, resource_id, details) VALUES ($1, $2, $3, $4, $5, $6)',
+      [7, 'BK-9999', 'ASSIGN_CASE', 'case', '55', JSON.stringify({ targetUserId: 9, role: 'investigator' })]
+    );
   });
 });

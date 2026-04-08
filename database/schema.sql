@@ -593,7 +593,196 @@ CREATE INDEX IF NOT EXISTS idx_admin_action_logs_action ON admin_action_logs(act
 CREATE INDEX IF NOT EXISTS idx_admin_action_logs_created ON admin_action_logs(created_at);
 
 -- ============================================================
--- 025: app_settings
+-- 025: admin_activity_feed_v
+-- ============================================================
+CREATE OR REPLACE VIEW admin_activity_feed_v AS
+SELECT
+    'audit'::TEXT AS source,
+    al.id::TEXT AS id,
+    al.created_at,
+    'officer'::TEXT AS actor_type,
+    al.user_id::TEXT AS actor_id,
+    COALESCE(u.full_name, al.officer_name, 'Unknown officer') AS actor_name,
+    u.email AS actor_email,
+    u.role AS actor_role,
+    al.action,
+    al.resource_type,
+    al.resource_id,
+    al.session_id,
+    COALESCE(HOST(al.ip_address), NULL) AS ip_address,
+    COALESCE(al.details, '{}'::jsonb) AS details,
+    CASE
+        WHEN COALESCE(al.details->>'caseId', '') ~ '^[0-9]+$' THEN (al.details->>'caseId')::INTEGER
+        WHEN al.resource_type = 'case' AND COALESCE(al.resource_id, '') ~ '^[0-9]+$' THEN al.resource_id::INTEGER
+        ELSE NULL
+    END AS case_id,
+    CASE
+        WHEN al.resource_type = 'file' AND COALESCE(al.resource_id, '') ~ '^[0-9]+$' THEN al.resource_id::INTEGER
+        WHEN COALESCE(al.details->>'fileId', '') ~ '^[0-9]+$' THEN (al.details->>'fileId')::INTEGER
+        ELSE NULL
+    END AS file_id
+FROM audit_logs al
+LEFT JOIN users u ON u.id = al.user_id
+
+UNION ALL
+
+SELECT
+    'admin'::TEXT AS source,
+    aal.id::TEXT AS id,
+    aal.created_at,
+    'admin'::TEXT AS actor_type,
+    aal.admin_account_id::TEXT AS actor_id,
+    COALESCE(aa.full_name, 'Unknown admin') AS actor_name,
+    aa.email AS actor_email,
+    aa.role AS actor_role,
+    aal.action,
+    aal.resource_type,
+    aal.resource_id,
+    aal.session_id,
+    COALESCE(HOST(aal.ip_address), NULL) AS ip_address,
+    COALESCE(aal.details, '{}'::jsonb) AS details,
+    CASE
+        WHEN COALESCE(aal.details->>'caseId', '') ~ '^[0-9]+$' THEN (aal.details->>'caseId')::INTEGER
+        WHEN aal.resource_type = 'case' AND COALESCE(aal.resource_id, '') ~ '^[0-9]+$' THEN aal.resource_id::INTEGER
+        ELSE NULL
+    END AS case_id,
+    CASE
+        WHEN aal.resource_type = 'file' AND COALESCE(aal.resource_id, '') ~ '^[0-9]+$' THEN aal.resource_id::INTEGER
+        WHEN COALESCE(aal.details->>'fileId', '') ~ '^[0-9]+$' THEN (aal.details->>'fileId')::INTEGER
+        ELSE NULL
+    END AS file_id
+FROM admin_action_logs aal
+LEFT JOIN admin_accounts aa ON aa.id = aal.admin_account_id;
+
+-- ============================================================
+-- 026: admin_case_overview_v
+-- ============================================================
+CREATE OR REPLACE VIEW admin_case_overview_v AS
+SELECT
+    c.id,
+    c.case_name,
+    c.case_number,
+    c.case_type,
+    c.fir_number,
+    c.operator,
+    c.status,
+    c.priority,
+    c.description,
+    c.investigation_details,
+    c.start_date,
+    c.end_date,
+    c.created_at,
+    c.updated_at,
+    c.is_evidence_locked,
+    c.locked_at,
+    c.lock_reason,
+    creator.id AS created_by_user_id,
+    creator.full_name AS created_by_name,
+    creator.buckle_id AS created_by_buckle_id,
+    COALESCE(owner_summary.owner_id, creator.id) AS owner_id,
+    COALESCE(owner_summary.owner_name, creator.full_name) AS owner_name,
+    COALESCE(owner_summary.owner_buckle_id, creator.buckle_id) AS owner_buckle_id,
+    COALESCE(assignment_summary.assignment_count, 0) AS assignment_count,
+    COALESCE(assignment_summary.assigned_officers, '[]'::jsonb) AS assigned_officers,
+    COALESCE(assignment_summary.assignment_search, '') AS assignment_search,
+    COALESCE(file_summary.file_count, 0) AS file_count,
+    COALESCE(file_summary.failed_parse_files, 0) AS failed_parse_files,
+    COALESCE(file_summary.completed_files, 0) AS completed_files,
+    COALESCE(file_summary.pending_files, 0) AS pending_files,
+    COALESCE(activity_summary.recent_activity_count, 0) AS recent_activity_count,
+    activity_summary.last_activity_at
+FROM cases c
+LEFT JOIN users creator ON creator.id = c.created_by_user_id
+LEFT JOIN LATERAL (
+    SELECT
+        owner_user.id AS owner_id,
+        owner_user.full_name AS owner_name,
+        owner_user.buckle_id AS owner_buckle_id
+    FROM case_assignments owner_assignment
+    JOIN users owner_user ON owner_user.id = owner_assignment.user_id
+    WHERE owner_assignment.case_id = c.id
+      AND owner_assignment.role = 'owner'
+      AND owner_assignment.is_active = TRUE
+    ORDER BY owner_assignment.assigned_at DESC
+    LIMIT 1
+) owner_summary ON TRUE
+LEFT JOIN LATERAL (
+    SELECT
+        COUNT(*)::INTEGER AS assignment_count,
+        COALESCE(
+            jsonb_agg(
+                jsonb_build_object(
+                    'userId', u.id,
+                    'fullName', u.full_name,
+                    'buckleId', u.buckle_id,
+                    'role', ca.role
+                )
+                ORDER BY ca.assigned_at DESC
+            ) FILTER (WHERE u.id IS NOT NULL),
+            '[]'::jsonb
+        ) AS assigned_officers,
+        COALESCE(
+            STRING_AGG(DISTINCT CONCAT_WS(' ', u.full_name, u.buckle_id), ' '),
+            ''
+        ) AS assignment_search
+    FROM case_assignments ca
+    JOIN users u ON u.id = ca.user_id
+    WHERE ca.case_id = c.id
+      AND ca.is_active = TRUE
+) assignment_summary ON TRUE
+LEFT JOIN LATERAL (
+    SELECT
+        COUNT(*)::INTEGER AS file_count,
+        COUNT(*) FILTER (WHERE uf.parse_status = 'failed')::INTEGER AS failed_parse_files,
+        COUNT(*) FILTER (WHERE uf.parse_status = 'completed')::INTEGER AS completed_files,
+        COUNT(*) FILTER (WHERE uf.parse_status IN ('pending', 'processing'))::INTEGER AS pending_files
+    FROM uploaded_files uf
+    WHERE uf.case_id = c.id
+) file_summary ON TRUE
+LEFT JOIN LATERAL (
+    SELECT
+        COUNT(*) FILTER (WHERE a.created_at >= NOW() - INTERVAL '7 days')::INTEGER AS recent_activity_count,
+        MAX(a.created_at) AS last_activity_at
+    FROM admin_activity_feed_v a
+    WHERE a.case_id = c.id
+) activity_summary ON TRUE;
+
+-- ============================================================
+-- 027: admin_file_governance_v
+-- ============================================================
+CREATE OR REPLACE VIEW admin_file_governance_v AS
+SELECT
+    uf.id,
+    uf.case_id,
+    c.case_name,
+    c.case_number,
+    c.status AS case_status,
+    c.priority AS case_priority,
+    c.is_evidence_locked,
+    uf.file_name,
+    uf.original_name,
+    uf.file_type,
+    uf.file_size,
+    uf.mime_type,
+    uf.parse_status,
+    uf.record_count,
+    uf.uploaded_by,
+    uploader.full_name AS uploaded_by_name,
+    uploader.buckle_id AS uploaded_by_buckle_id,
+    uf.uploaded_at,
+    fc.expected_type,
+    fc.detected_type,
+    fc.confidence,
+    fc.classification_result,
+    fc.error_message,
+    COALESCE(fc.detected_type, fc.expected_type, uf.file_type, 'unknown') AS telecom_module
+FROM uploaded_files uf
+LEFT JOIN cases c ON c.id = uf.case_id
+LEFT JOIN users uploader ON uploader.id = uf.uploaded_by
+LEFT JOIN file_classifications fc ON fc.file_id = uf.id;
+
+-- ============================================================
+-- 028: app_settings
 -- ============================================================
 CREATE TABLE IF NOT EXISTS app_settings (
     id          SERIAL PRIMARY KEY,

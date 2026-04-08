@@ -459,6 +459,24 @@ router.put('/:id', authenticateToken, requireCaseAccess('investigator'), checkEv
     );
 
     if (result.rows.length === 0) return res.status(404).json({ error: 'Case not found' });
+
+    const updatedFields = Object.entries({
+      caseName,
+      operator,
+      investigationDetails,
+      startDate,
+      endDate,
+      priority,
+      status,
+    })
+      .filter(([, value]) => value !== undefined && value !== null && value !== '')
+      .map(([key]) => key);
+
+    await pool.query(
+      'INSERT INTO audit_logs (user_id, officer_buckle_id, action, resource_type, resource_id, details) VALUES ($1, $2, $3, $4, $5, $6)',
+      [userId, req.user.buckleId, 'UPDATE_CASE', 'case', req.params.id, JSON.stringify({ updatedFields })]
+    );
+
     res.json(result.rows[0]);
   } catch (err) {
     console.error('Update case error:', err);
@@ -551,6 +569,19 @@ router.post('/:id/lock', authenticateToken, requireRole('super_admin', 'station_
       [req.user.userId, reason || 'Legal proceedings', req.params.id]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Case not found' });
+
+    await pool.query(
+      'INSERT INTO audit_logs (user_id, officer_buckle_id, action, resource_type, resource_id, details) VALUES ($1, $2, $3, $4, $5, $6)',
+      [
+        req.user.userId,
+        req.user.buckleId,
+        'LOCK_CASE',
+        'case',
+        req.params.id,
+        JSON.stringify({ reason: reason || 'Legal proceedings' }),
+      ]
+    );
+
     res.json({ message: 'Case evidence-locked', case: result.rows[0] });
   } catch (err) {
     res.status(500).json({ error: 'Failed to lock case' });
@@ -566,6 +597,12 @@ router.post('/:id/unlock', authenticateToken, requireRole('super_admin'), async 
       [req.params.id]
     );
     if (result.rows.length === 0) return res.status(404).json({ error: 'Case not found' });
+
+    await pool.query(
+      'INSERT INTO audit_logs (user_id, officer_buckle_id, action, resource_type, resource_id) VALUES ($1, $2, $3, $4, $5)',
+      [req.user.userId, req.user.buckleId, 'UNLOCK_CASE', 'case', req.params.id]
+    );
+
     res.json({ message: 'Case unlocked', case: result.rows[0] });
   } catch (err) {
     res.status(500).json({ error: 'Failed to unlock case' });
@@ -582,9 +619,22 @@ router.post('/:id/assignments', authenticateToken, requireCaseAccess('owner'), a
       `INSERT INTO case_assignments (case_id, user_id, role, assigned_by)
        VALUES ($1, $2, $3, $4)
        ON CONFLICT (case_id, user_id) DO UPDATE SET role = $3, is_active = TRUE, revoked_at = NULL
-       RETURNING *`,
+      RETURNING *`,
       [req.params.id, targetUserId, role || 'investigator', req.user.userId]
     );
+
+    await pool.query(
+      'INSERT INTO audit_logs (user_id, officer_buckle_id, action, resource_type, resource_id, details) VALUES ($1, $2, $3, $4, $5, $6)',
+      [
+        req.user.userId,
+        req.user.buckleId,
+        'ASSIGN_CASE',
+        'case',
+        req.params.id,
+        JSON.stringify({ targetUserId, role: role || 'investigator' }),
+      ]
+    );
+
     res.status(201).json(result.rows[0]);
   } catch (err) {
     console.error('Assign officer error:', err);

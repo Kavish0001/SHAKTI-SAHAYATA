@@ -280,6 +280,25 @@ describe('admin console endpoints', () => {
     expect(itemsQueryCall[1]).toEqual(expect.arrayContaining(['%Inspector%', 'sess-off-1', '%10.0.0.8%']));
   });
 
+  it('broadens case filters to include events linked through details.caseId', async () => {
+    const response = await request(app)
+      .get('/api/admin/activity')
+      .query({ caseId: '101' })
+      .set('Authorization', `Bearer ${createAdminToken()}`);
+
+    expect(response.status).toBe(200);
+
+    const itemsQueryCall = queryMock.mock.calls.find(
+      ([sql]) =>
+        String(sql).includes('FROM unified_activity')
+        && String(sql).includes("COALESCE(details->>'caseId', '') =")
+    );
+
+    expect(itemsQueryCall).toBeTruthy();
+    expect(String(itemsQueryCall[0])).toContain("resource_type = 'case'");
+    expect(itemsQueryCall[1]).toEqual(expect.arrayContaining(['101']));
+  });
+
   it('returns officers/admins summary data for the users view', async () => {
     const response = await request(app)
       .get('/api/admin/users')

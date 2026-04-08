@@ -114,14 +114,15 @@ export const initializeDatabase = async () => {
   console.log('[initDb] Checking database state...');
   
   const tablesExist = await checkTablesExist();
-  
+
   if (!tablesExist) {
     console.log('[initDb] Tables not found. Applying schema...');
-    const schemaApplied = await applySchema();
-    if (!schemaApplied) return;
   } else {
-    console.log('[initDb] ✅ Core tables already exist');
+    console.log('[initDb] ✅ Core tables already exist; refreshing idempotent schema objects');
   }
+
+  const schemaApplied = await applySchema();
+  if (!schemaApplied && !tablesExist) return;
 
   await applySeed();
   console.log('[initDb] ✅ Seed users and defaults verified');
