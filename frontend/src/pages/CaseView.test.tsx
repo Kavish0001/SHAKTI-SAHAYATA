@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import CaseView from './CaseView'
 
 const getCaseMock = vi.fn()
+const getTimelineMock = vi.fn()
 const archiveCaseMock = vi.fn()
 const removeCaseMock = vi.fn()
 const listFilesMock = vi.fn()
@@ -17,7 +18,7 @@ const ipdrAnalysisRenderMock = vi.fn()
 vi.mock('../components/lib/apis', () => ({
   caseAPI: {
     get: (...args: unknown[]) => getCaseMock(...args),
-    getTimeline: vi.fn(),
+    getTimeline: (...args: unknown[]) => getTimelineMock(...args),
     archive: (...args: unknown[]) => archiveCaseMock(...args),
     remove: (...args: unknown[]) => removeCaseMock(...args),
   },
@@ -71,6 +72,7 @@ vi.mock('../components/analysis/ILDAnalysis', () => ({
 describe('CaseView', () => {
   beforeEach(() => {
     getCaseMock.mockReset()
+    getTimelineMock.mockReset()
     archiveCaseMock.mockReset()
     removeCaseMock.mockReset()
     listFilesMock.mockReset()
@@ -106,6 +108,21 @@ describe('CaseView', () => {
       { id: 4, original_name: 'tower.csv', file_type: 'tower', detected_type: 'tower_dump', uploaded_at: '2026-04-08T00:00:00.000Z' },
     ])
     getRecordCountMock.mockResolvedValue(12)
+    getTimelineMock.mockResolvedValue({
+      events: [
+        {
+          source: 'cdr',
+          event_time: '2026-04-08T10:30:00.000Z',
+          title: 'Mocked Timeline Event',
+          details: {
+            file_id: 29,
+            operator: 'VODAFONE',
+            duration_sec: 10,
+          },
+        },
+      ],
+      limit: 250,
+    })
     removeFileMock.mockResolvedValue({ fileId: 1, deleted: true, deletedRecords: 125, deletedType: 'cdr' })
     ingestCaseUploadsMock.mockResolvedValue([])
     archiveCaseMock.mockResolvedValue({ message: 'Case archived' })
@@ -166,6 +183,17 @@ describe('CaseView', () => {
     expect(screen.getByText('ipdr-b.csv')).toBeInTheDocument()
     expect(screen.queryByText('cdr-main.csv')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: /upload ipdr/i })).toBeInTheDocument()
+  })
+
+  it('renders the timeline feed without the old 3D perspective hover classes', async () => {
+    const { container } = renderAt('/case/42')
+
+    fireEvent.click(await screen.findByRole('button', { name: /^timeline$/i }))
+
+    expect(await screen.findByText('Mocked Timeline Event')).toBeInTheDocument()
+    expect(screen.getByText(/VODAFONE/i)).toBeInTheDocument()
+    expect(getTimelineMock).toHaveBeenCalledWith('42')
+    expect(container.innerHTML).not.toContain('perspective(')
   })
 
   it('archives a case from the overview header and refreshes the status badge', async () => {

@@ -27,10 +27,13 @@ const DATA_TYPES = [
 ];
 
 const tiltCardClass =
-  'transform-gpu transition duration-300 hover:[transform:perspective(1200px)_rotateX(3deg)_rotateY(-3deg)_translateY(-4px)] hover:shadow-[0_22px_50px_rgba(10,19,51,0.18)]';
+  'transition-[transform,box-shadow,border-color] duration-200 ease-out hover:-translate-y-1 hover:shadow-[0_18px_38px_rgba(10,19,51,0.14)]';
 
 const tiltShellClass =
-  'transform-gpu transition duration-300 hover:[transform:perspective(1800px)_rotateX(1.5deg)_rotateY(-1.5deg)_translateY(-2px)]';
+  'transition-shadow duration-200 ease-out hover:shadow-[0_16px_34px_rgba(10,19,51,0.10)]';
+
+const timelineCardClass =
+  'transition-[border-color,box-shadow,background-color] duration-200 ease-out hover:border-slate-300/80 hover:shadow-md dark:hover:border-slate-700/80';
 
 const CDRAdvancedAnalysis = lazy(() => import('../components/analysis/CDRAdvancedAnalysis').then(m => ({ default: m.AdvancedAnalytics })));
 // IPDRAnalytics already has a default export
@@ -561,7 +564,7 @@ export default function CaseView() {
                       key={`${event.source}-${event.title}-${index}`}
                       className={cn(
                         'rounded-xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900',
-                        tiltCardClass
+                        timelineCardClass
                       )}
                     >
                       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -573,7 +576,7 @@ export default function CaseView() {
                           {event.event_time ? new Date(event.event_time).toLocaleString() : 'Timestamp unavailable'}
                         </p>
                       </div>
-                      <pre className="mt-4 overflow-x-auto rounded-lg bg-slate-50 p-4 text-xs whitespace-pre-wrap text-slate-700 dark:bg-slate-950 dark:text-slate-300">
+                      <pre className="mt-4 max-h-[24rem] overflow-auto rounded-lg bg-slate-50 p-4 text-xs whitespace-pre-wrap break-words text-slate-700 dark:bg-slate-950 dark:text-slate-300">
                         {JSON.stringify(event.details || {}, null, 2)}
                       </pre>
                     </div>
