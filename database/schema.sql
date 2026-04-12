@@ -542,6 +542,163 @@ CREATE INDEX IF NOT EXISTS idx_case_memory_scope ON case_memory_snapshots(case_i
 CREATE INDEX IF NOT EXISTS idx_case_memory_generated ON case_memory_snapshots(generated_at DESC);
 
 -- ============================================================
+-- 017B: case_module_snapshots — Exact chatbot module facts
+-- ============================================================
+CREATE TABLE IF NOT EXISTS case_module_snapshots (
+    id                  SERIAL PRIMARY KEY,
+    case_id             INTEGER NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+    module              VARCHAR(30) NOT NULL,
+    summary_markdown    TEXT,
+    snapshot_json       JSONB NOT NULL DEFAULT '{}'::jsonb,
+    source_row_count    INTEGER NOT NULL DEFAULT 0,
+    source_file_count   INTEGER NOT NULL DEFAULT 0,
+    case_version        VARCHAR(80) NOT NULL,
+    computed_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT unique_case_module_snapshot UNIQUE (case_id, module)
+);
+CREATE INDEX IF NOT EXISTS idx_case_module_snapshots_case ON case_module_snapshots(case_id);
+CREATE INDEX IF NOT EXISTS idx_case_module_snapshots_computed ON case_module_snapshots(case_id, computed_at DESC);
+
+-- ============================================================
+-- 017C: case_metric_facts — Exact scalar / structured facts
+-- ============================================================
+CREATE TABLE IF NOT EXISTS case_metric_facts (
+    id                  SERIAL PRIMARY KEY,
+    case_id             INTEGER NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+    module              VARCHAR(30) NOT NULL,
+    metric_key          VARCHAR(120) NOT NULL,
+    metric_value        JSONB NOT NULL DEFAULT '{}'::jsonb,
+    source_row_count    INTEGER NOT NULL DEFAULT 0,
+    source_file_count   INTEGER NOT NULL DEFAULT 0,
+    case_version        VARCHAR(80) NOT NULL,
+    computed_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT unique_case_metric_fact UNIQUE (case_id, module, metric_key)
+);
+CREATE INDEX IF NOT EXISTS idx_case_metric_facts_case ON case_metric_facts(case_id);
+CREATE INDEX IF NOT EXISTS idx_case_metric_facts_lookup ON case_metric_facts(case_id, module, metric_key);
+
+-- ============================================================
+-- 017D: case_ranked_entities — Ranked top-N entities for chatbot
+-- ============================================================
+CREATE TABLE IF NOT EXISTS case_ranked_entities (
+    id                  SERIAL PRIMARY KEY,
+    case_id             INTEGER NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+    module              VARCHAR(30) NOT NULL,
+    entity_type         VARCHAR(80) NOT NULL,
+    metric_key          VARCHAR(120) NOT NULL,
+    rank                INTEGER NOT NULL,
+    entity_value        TEXT NOT NULL,
+    count_value         BIGINT,
+    duration_value      BIGINT,
+    extra_json          JSONB NOT NULL DEFAULT '{}'::jsonb,
+    source_row_count    INTEGER NOT NULL DEFAULT 0,
+    source_file_count   INTEGER NOT NULL DEFAULT 0,
+    case_version        VARCHAR(80) NOT NULL,
+    computed_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT unique_case_ranked_entity UNIQUE (case_id, module, entity_type, metric_key, rank)
+);
+CREATE INDEX IF NOT EXISTS idx_case_ranked_entities_case ON case_ranked_entities(case_id);
+CREATE INDEX IF NOT EXISTS idx_case_ranked_entities_lookup ON case_ranked_entities(case_id, module, entity_type, metric_key, rank);
+
+-- ============================================================
+-- 017E: case_time_series_facts — Time-bucketed facts
+-- ============================================================
+CREATE TABLE IF NOT EXISTS case_time_series_facts (
+    id                  SERIAL PRIMARY KEY,
+    case_id             INTEGER NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+    module              VARCHAR(30) NOT NULL,
+    metric_key          VARCHAR(120) NOT NULL,
+    bucket_key          VARCHAR(120) NOT NULL,
+    bucket_label        VARCHAR(160) NOT NULL,
+    count_value         BIGINT,
+    duration_value      BIGINT,
+    extra_json          JSONB NOT NULL DEFAULT '{}'::jsonb,
+    source_row_count    INTEGER NOT NULL DEFAULT 0,
+    source_file_count   INTEGER NOT NULL DEFAULT 0,
+    case_version        VARCHAR(80) NOT NULL,
+    computed_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT unique_case_time_series_fact UNIQUE (case_id, module, metric_key, bucket_key)
+);
+CREATE INDEX IF NOT EXISTS idx_case_time_series_case ON case_time_series_facts(case_id);
+CREATE INDEX IF NOT EXISTS idx_case_time_series_lookup ON case_time_series_facts(case_id, module, metric_key, computed_at DESC);
+
+-- ============================================================
+-- 017F: case_geo_facts — Geo / location facts
+-- ============================================================
+CREATE TABLE IF NOT EXISTS case_geo_facts (
+    id                  SERIAL PRIMARY KEY,
+    case_id             INTEGER NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+    module              VARCHAR(30) NOT NULL,
+    dimension_key       VARCHAR(120) NOT NULL,
+    rank                INTEGER NOT NULL DEFAULT 1,
+    label               TEXT NOT NULL,
+    count_value         BIGINT,
+    duration_value      BIGINT,
+    latitude            DOUBLE PRECISION,
+    longitude           DOUBLE PRECISION,
+    extra_json          JSONB NOT NULL DEFAULT '{}'::jsonb,
+    source_row_count    INTEGER NOT NULL DEFAULT 0,
+    source_file_count   INTEGER NOT NULL DEFAULT 0,
+    case_version        VARCHAR(80) NOT NULL,
+    computed_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT unique_case_geo_fact UNIQUE (case_id, module, dimension_key, rank, label)
+);
+CREATE INDEX IF NOT EXISTS idx_case_geo_facts_case ON case_geo_facts(case_id);
+CREATE INDEX IF NOT EXISTS idx_case_geo_facts_lookup ON case_geo_facts(case_id, module, dimension_key, rank);
+
+-- ============================================================
+-- 017G: case_chat_query_log — Chatbot analytics audit
+-- ============================================================
+CREATE TABLE IF NOT EXISTS case_chat_query_log (
+    id                  SERIAL PRIMARY KEY,
+    case_id             INTEGER REFERENCES cases(id) ON DELETE CASCADE,
+    user_id             INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    session_id          TEXT,
+    query_text          TEXT NOT NULL,
+    route_used          VARCHAR(120) NOT NULL,
+    response_mode       VARCHAR(30) NOT NULL,
+    refusal_code        VARCHAR(80),
+    latency_ms          INTEGER,
+    freshness           JSONB NOT NULL DEFAULT '{}'::jsonb,
+    metadata            JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_case_chat_query_log_case ON case_chat_query_log(case_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_case_chat_query_log_user ON case_chat_query_log(user_id, created_at DESC);
+
+-- ============================================================
+-- 017H: case_knowledge_jobs — Fact / artifact refresh jobs
+-- ============================================================
+CREATE TABLE IF NOT EXISTS case_knowledge_jobs (
+    id                  SERIAL PRIMARY KEY,
+    case_id             INTEGER NOT NULL REFERENCES cases(id) ON DELETE CASCADE,
+    requested_modules   TEXT[] NOT NULL DEFAULT '{}'::TEXT[],
+    status              VARCHAR(20) NOT NULL DEFAULT 'queued'
+                        CHECK (status IN ('queued', 'running', 'completed', 'failed')),
+    reason              VARCHAR(120),
+    case_version        VARCHAR(80),
+    artifact_bucket     TEXT,
+    artifact_manifest   JSONB NOT NULL DEFAULT '{}'::jsonb,
+    error_text          TEXT,
+    started_at          TIMESTAMPTZ,
+    completed_at        TIMESTAMPTZ,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_case_knowledge_jobs_case ON case_knowledge_jobs(case_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_case_knowledge_jobs_status ON case_knowledge_jobs(status, updated_at DESC);
+
+-- ============================================================
 -- 018: evidence_exports (§42.2)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS evidence_exports (

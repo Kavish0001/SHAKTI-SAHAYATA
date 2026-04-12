@@ -17,6 +17,7 @@ import { handleUploadError, upload } from '../middleware/upload.js';
 import { emitAdminConsoleEvent } from '../services/admin/adminEventStream.service.js';
 import { classifyFile, extractHeadersFromFile } from '../services/fileClassifier.js';
 import { invalidateCaseMemorySnapshots } from '../services/chatbot/caseMemorySnapshot.service.js';
+import { queueCaseKnowledgeRefresh } from '../services/chatbot/caseKnowledge.service.js';
 
 const router = Router();
 const __filename = fileURLToPath(import.meta.url);
@@ -508,6 +509,7 @@ router.post('/complete-upload', async (req, res) => {
 
     const payload = buildFileResponse(fileRecord, classification);
     await invalidateCaseMemorySnapshots({ caseId });
+    void queueCaseKnowledgeRefresh({ caseId, modules: ['cdr', 'ipdr', 'sdr', 'tower', 'ild'], reason: 'file_completed_upload' });
     emitFileLifecycleEvents({
       fileId: fileRecord.id,
       caseId,
@@ -608,6 +610,7 @@ router.post('/upload/:type?', upload.single('file'), handleUploadError, async (r
 
     const payload = buildFileResponse(fileRecord, classification);
     await invalidateCaseMemorySnapshots({ caseId });
+    void queueCaseKnowledgeRefresh({ caseId, modules: ['cdr', 'ipdr', 'sdr', 'tower', 'ild'], reason: 'file_uploaded_local' });
     emitFileLifecycleEvents({
       fileId: fileRecord.id,
       caseId,
@@ -766,6 +769,7 @@ router.delete('/:fileId', async (req, res) => {
     }
 
     await invalidateCaseMemorySnapshots({ caseId: fileRecord.case_id });
+    void queueCaseKnowledgeRefresh({ caseId: fileRecord.case_id, modules: ['cdr', 'ipdr', 'sdr', 'tower', 'ild'], reason: 'file_deleted' });
 
     emitFileLifecycleEvents({
       fileId,

@@ -5,6 +5,7 @@ import { upload, handleUploadError } from '../middleware/upload.js';
 import XLSX from 'xlsx';
 import { emitAdminConsoleEvent } from '../services/admin/adminEventStream.service.js';
 import { invalidateCaseMemorySnapshots } from '../services/chatbot/caseMemorySnapshot.service.js';
+import { queueCaseKnowledgeRefresh } from '../services/chatbot/caseKnowledge.service.js';
 import { buildPaginationPayload, parsePaginationParams, toInt } from '../utils/analysisRouteUtils.js';
 
 const router = Router();
@@ -275,6 +276,7 @@ router.post('/records', authenticateToken, async (req, res) => {
 
     await updateUploadedFileProgress(fileId, inserted);
     await invalidateCaseMemorySnapshots({ caseId: parsedCaseId, module: 'sdr' });
+    void queueCaseKnowledgeRefresh({ caseId: parsedCaseId, modules: ['sdr'], reason: 'sdr_records_inserted' });
     emitIngestionCompletionEvents({ caseId: parsedCaseId, fileId: toInt(fileId), inserted, module: 'sdr' });
 
     res.json({ inserted });
@@ -383,6 +385,7 @@ router.post('/table/replace', authenticateToken, async (req, res) => {
 
     if (caseId) {
       await invalidateCaseMemorySnapshots({ caseId, module: 'sdr' });
+      void queueCaseKnowledgeRefresh({ caseId, modules: ['sdr'], reason: 'sdr_table_replaced' });
     }
     res.json({ inserted, skipped: 0 });
   } catch (error) {
@@ -406,6 +409,7 @@ router.delete('/table', authenticateToken, async (req, res) => {
 
     if (caseId) {
       await invalidateCaseMemorySnapshots({ caseId, module: 'sdr' });
+      void queueCaseKnowledgeRefresh({ caseId, modules: ['sdr'], reason: 'sdr_table_deleted' });
     }
     res.json({ dropped: result.rowCount || 0 });
   } catch (error) {
@@ -549,6 +553,7 @@ router.post('/upload', authenticateToken, upload.single('file'), handleUploadErr
 
     if (caseId) {
       await invalidateCaseMemorySnapshots({ caseId, module: 'sdr' });
+      void queueCaseKnowledgeRefresh({ caseId, modules: ['sdr'], reason: 'sdr_upload_replaced' });
     }
     return res.json({ table: DEFAULT_TABLE_NAME, inserted, skipped: 0 });
   } catch (error) {

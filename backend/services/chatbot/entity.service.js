@@ -17,9 +17,40 @@ const extractTaggedCaseRef = (text) => {
   return simple?.[1] || null;
 };
 
+export const extractTaggedCaseRefs = (text) => {
+  const raw = String(text || '');
+  const refs = [];
+  const seen = new Set();
+
+  const quotedPattern = /@"([^"]{2,})"/gi;
+  let quotedMatch;
+  while ((quotedMatch = quotedPattern.exec(raw)) !== null) {
+    const value = String(quotedMatch[1] || '').trim();
+    const key = value.toLowerCase();
+    if (value && !seen.has(key)) {
+      refs.push(value);
+      seen.add(key);
+    }
+  }
+
+  const simplePattern = /(?:^|\s)@([a-z0-9][a-z0-9_\-\/]{1,63})\b/gi;
+  let simpleMatch;
+  while ((simpleMatch = simplePattern.exec(raw)) !== null) {
+    const value = String(simpleMatch[1] || '').trim();
+    const key = value.toLowerCase();
+    if (value && !seen.has(key)) {
+      refs.push(value);
+      seen.add(key);
+    }
+  }
+
+  return refs;
+};
+
 export const extractMessageEntities = (message, context = {}) => {
   const raw = String(message || '');
   const text = unwrapUserMessage(raw);
+  const taggedCaseRefs = extractTaggedCaseRefs(text);
 
   const fir = text.match(/\bfir\s*[-:#]?\s*([a-z0-9\-\/]+)\b/i)?.[1] || null;
   const caseIdExplicit =
@@ -27,7 +58,7 @@ export const extractMessageEntities = (message, context = {}) => {
     text.match(/\bcase\s*[-:#]?\s*(\d+)\b/i)?.[1] ||
     context.caseId ||
     null;
-  const taggedCaseRef = extractTaggedCaseRef(text) || context.caseName || null;
+  const taggedCaseRef = taggedCaseRefs[0] || extractTaggedCaseRef(text) || context.caseName || null;
   const topN = extractTopN(text);
   const days = Number(text.match(/\b(last|past)\s+(\d{1,3})\s+days?\b/i)?.[2] || 0) || null;
 
@@ -44,6 +75,8 @@ export const extractMessageEntities = (message, context = {}) => {
     caseId: caseIdExplicit,
     caseName: context.caseName || null,
     taggedCaseRef,
+    taggedCaseRefs,
+    tagCount: taggedCaseRefs.length,
     topN,
     days,
     module,
@@ -57,6 +90,10 @@ export const mergeSessionEntities = (sessionState = {}, newEntities = {}) => {
     caseId: newEntities.caseId || sessionState.caseId || null,
     caseName: newEntities.caseName || sessionState.caseName || null,
     taggedCaseRef: newEntities.taggedCaseRef || sessionState.taggedCaseRef || null,
+    taggedCaseRefs: Array.isArray(newEntities.taggedCaseRefs) && newEntities.taggedCaseRefs.length > 0
+      ? newEntities.taggedCaseRefs
+      : (Array.isArray(sessionState.taggedCaseRefs) ? sessionState.taggedCaseRefs : []),
+    tagCount: Number(newEntities.tagCount) || Number(sessionState.tagCount) || 0,
     module: newEntities.module || sessionState.module || null,
     topN: newEntities.topN || sessionState.topN || null,
     days: newEntities.days || sessionState.days || null,

@@ -13,6 +13,7 @@ const supabaseJwtAudience = trim(process.env.SUPABASE_JWT_AUDIENCE || 'authentic
 const evidenceBucket = trim(process.env.SUPABASE_STORAGE_BUCKET_EVIDENCE || 'case-evidence');
 const exportsBucket = trim(process.env.SUPABASE_STORAGE_BUCKET_EXPORTS || 'admin-exports');
 const quarantineBucket = trim(process.env.SUPABASE_STORAGE_BUCKET_QUARANTINE || 'legacy-quarantine');
+const knowledgeBucket = trim(process.env.SUPABASE_STORAGE_BUCKET_CHAT_KNOWLEDGE || 'case-knowledge-artifacts');
 
 export const SUPABASE_CONFIG = {
   url: supabaseUrl,
@@ -23,6 +24,7 @@ export const SUPABASE_CONFIG = {
   evidenceBucket,
   exportsBucket,
   quarantineBucket,
+  knowledgeBucket,
   dbPoolerUrl: trim(process.env.SUPABASE_DB_URL_POOLER),
   dbDirectUrl: trim(process.env.SUPABASE_DB_URL_DIRECT),
   localDev: ['1', 'true', 'yes', 'on'].includes(trim(process.env.SUPABASE_LOCAL_DEV).toLowerCase()),
@@ -115,5 +117,6 @@ export const buildSupabaseStoragePath = ({ caseId, expectedType, module, origina
 export const getSupabaseBucket = (bucket = 'evidence') => {
   if (bucket === 'exports') return SUPABASE_CONFIG.exportsBucket;
   if (bucket === 'quarantine') return SUPABASE_CONFIG.quarantineBucket;
+  if (bucket === 'knowledge') return SUPABASE_CONFIG.knowledgeBucket;
   return SUPABASE_CONFIG.evidenceBucket;
 };

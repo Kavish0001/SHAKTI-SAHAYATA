@@ -5,6 +5,7 @@ import { authenticateToken } from '../middleware/auth.js';
 import { combineDateAndTime, normalizeDateString, normalizeTimeString, parseLooseTimestamp } from '../utils/timestamps.js';
 import { emitAdminConsoleEvent } from '../services/admin/adminEventStream.service.js';
 import { invalidateCaseMemorySnapshots } from '../services/chatbot/caseMemorySnapshot.service.js';
+import { queueCaseKnowledgeRefresh } from '../services/chatbot/caseKnowledge.service.js';
 import { asText, buildPaginationPayload, parsePaginationParams, toInt } from '../utils/analysisRouteUtils.js';
 
 const router = Router();
@@ -321,6 +322,7 @@ router.post('/records', authenticateToken, async (req, res) => {
     }
     await updateUploadedFileProgress(fileId, inserted);
     await invalidateCaseMemorySnapshots({ caseId: parsedCaseId, module: 'tower' });
+    void queueCaseKnowledgeRefresh({ caseId: parsedCaseId, modules: ['tower'], reason: 'tower_records_inserted' });
     emitIngestionCompletionEvents({ caseId: parsedCaseId, fileId: toInt(fileId), inserted, module: 'tower_dump' });
     res.json({ inserted });
   } catch (error) {

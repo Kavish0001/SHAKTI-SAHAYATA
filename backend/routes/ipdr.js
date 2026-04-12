@@ -5,6 +5,7 @@ import { authenticateToken } from '../middleware/auth.js';
 import { parseLooseTimestamp } from '../utils/timestamps.js';
 import { emitAdminConsoleEvent } from '../services/admin/adminEventStream.service.js';
 import { invalidateCaseMemorySnapshots } from '../services/chatbot/caseMemorySnapshot.service.js';
+import { queueCaseKnowledgeRefresh } from '../services/chatbot/caseKnowledge.service.js';
 import { asText, buildPaginationPayload, parsePaginationParams, toInt } from '../utils/analysisRouteUtils.js';
 
 const router = Router();
@@ -470,6 +471,7 @@ router.post('/records', authenticateToken, async (req, res) => {
     }
     await updateUploadedFileProgress(fileId, inserted);
     await invalidateCaseMemorySnapshots({ caseId: parsedCaseId, module: 'ipdr' });
+    void queueCaseKnowledgeRefresh({ caseId: parsedCaseId, modules: ['ipdr'], reason: 'ipdr_records_inserted' });
     emitIngestionCompletionEvents({ caseId: parsedCaseId, fileId: toInt(fileId), inserted, module: 'ipdr' });
     res.json({ inserted });
   } catch (error) {
@@ -565,6 +567,7 @@ router.post('/enrich-case', authenticateToken, async (req, res) => {
       updatedRows,
       skippedPrivate,
     });
+    void queueCaseKnowledgeRefresh({ caseId, modules: ['ipdr'], reason: 'ipdr_enrichment_completed' });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

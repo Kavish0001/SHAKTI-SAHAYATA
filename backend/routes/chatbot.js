@@ -35,7 +35,7 @@ import {
   resolveCaseReference,
   searchCasesForChat
 } from '../services/chatbot/caseContext.service.js';
-import { extractMessageEntities, mergeSessionEntities } from '../services/chatbot/entity.service.js';
+import { extractMessageEntities, extractTaggedCaseRefs, mergeSessionEntities } from '../services/chatbot/entity.service.js';
 import {
   buildWorkspaceContextPrompt,
   lookupWorkspaceAnswer,
@@ -59,6 +59,19 @@ import { retrieveRagMatches } from '../services/chatbot/rag/rag.service.js';
 import { computeConfidence, formatConfidenceBlock } from '../services/chatbot/confidence.service.js';
 import { guardAgainstHallucination } from '../services/chatbot/hullcinationCheakService.js';
 import { enforceRagScope } from '../services/chatbot/ragPolicy.service.js';
+import {
+  buildCaseGroundedRefusal,
+  buildCaseSummaryAnswer,
+  buildExactCaseAnswer,
+  getCaseContextGeoFacts,
+  getCaseContextScalar,
+  getCaseContextSummary,
+  getCaseContextTimeSeries,
+  getCaseContextTopEntities,
+  getCrossModuleOverlap,
+  logCaseChatQuery,
+  readCaseKnowledgeArtifact,
+} from '../services/chatbot/caseKnowledge.service.js';
 import { randomUUID } from 'crypto';
 
 const router = express.Router();
@@ -1356,8 +1369,166 @@ const chatHandler = async (req, res) => {
     }
     session.history.push({ role: 'user', content: messageValidation.text });
     touchSessionById(session.id);
+    const explicitTaggedCaseRefs = extractTaggedCaseRefs(messageValidation.text);
     const context = parseContextFromMessage(messageValidation.text);
     const entities = extractMessageEntities(messageValidation.text, context);
+    const strictEffectiveLanguage = requestedLanguage || entities.language || 'en';
+
+    if (explicitTaggedCaseRefs.length === 0) {
+      const refusal = buildCaseGroundedRefusal('CASE_TAG_REQUIRED');
+      logState.route = 'strict_case_tag_required';
+      logState.mode = refusal.mode;
+      logState.assistantResponse = refusal.responseText;
+      await logStrictCaseGroundedQuery({
+        req,
+        session,
+        caseId: null,
+        message: messageValidation.text,
+        routeUsed: logState.route,
+        responseMode: refusal.mode,
+        refusalCode: refusal.refusalCode,
+        answerPayload: refusal.answerPayload,
+        startedAt,
+      });
+      sendResponse({
+        res,
+        session,
+        responseText: refusal.responseText,
+        mode: refusal.mode,
+        logState,
+        effectiveLanguage: strictEffectiveLanguage,
+        confidenceInput: { mode: refusal.mode, intentScore: 1, intentLabel: refusal.refusalCode || 'CASE_TAG_REQUIRED' },
+        extra: { answerPayload: refusal.answerPayload, reasonCode: refusal.refusalCode }
+      });
+      return;
+    }
+
+    if (explicitTaggedCaseRefs.length > 1) {
+      const refusal = buildCaseGroundedRefusal('MULTI_CASE_NOT_SUPPORTED');
+      logState.route = 'strict_multi_case_refusal';
+      logState.mode = refusal.mode;
+      logState.assistantResponse = refusal.responseText;
+      await logStrictCaseGroundedQuery({
+        req,
+        session,
+        caseId: null,
+        message: messageValidation.text,
+        routeUsed: logState.route,
+        responseMode: refusal.mode,
+        refusalCode: refusal.refusalCode,
+        answerPayload: refusal.answerPayload,
+        startedAt,
+        metadata: { taggedCaseRefs: explicitTaggedCaseRefs }
+      });
+      sendResponse({
+        res,
+        session,
+        responseText: refusal.responseText,
+        mode: refusal.mode,
+        logState,
+        effectiveLanguage: strictEffectiveLanguage,
+        confidenceInput: { mode: refusal.mode, intentScore: 1, intentLabel: refusal.refusalCode || 'MULTI_CASE_NOT_SUPPORTED' },
+        extra: { answerPayload: refusal.answerPayload, reasonCode: refusal.refusalCode }
+      });
+      return;
+    }
+
+    const strictCaseLookup = await resolveCaseReference({
+      user: req.user || null,
+      caseId: context?.caseId || null,
+      firNumber: context?.fir || null,
+      reference: explicitTaggedCaseRefs[0]
+    });
+
+    if (!strictCaseLookup?.caseRow || strictCaseLookup?.ambiguous) {
+      const refusal = buildCaseGroundedRefusal('CASE_NOT_ACCESSIBLE');
+      logState.route = 'strict_case_resolution_refusal';
+      logState.mode = refusal.mode;
+      logState.assistantResponse = refusal.responseText;
+      await logStrictCaseGroundedQuery({
+        req,
+        session,
+        caseId: null,
+        message: messageValidation.text,
+        routeUsed: logState.route,
+        responseMode: refusal.mode,
+        refusalCode: refusal.refusalCode,
+        answerPayload: refusal.answerPayload,
+        startedAt,
+        metadata: { taggedCaseRef: explicitTaggedCaseRefs[0], ambiguous: Boolean(strictCaseLookup?.ambiguous) }
+      });
+      sendResponse({
+        res,
+        session,
+        responseText: refusal.responseText,
+        mode: refusal.mode,
+        logState,
+        effectiveLanguage: strictEffectiveLanguage,
+        confidenceInput: { mode: refusal.mode, intentScore: 1, intentLabel: refusal.refusalCode || 'CASE_NOT_ACCESSIBLE' },
+        extra: { answerPayload: refusal.answerPayload, reasonCode: refusal.refusalCode }
+      });
+      return;
+    }
+
+    const strictCase = strictCaseLookup.caseRow;
+    const strictCaseId = Number(strictCase.id);
+    const strictCaseLabel = strictCase.case_name || strictCase.case_number || `Case ${strictCase.id}`;
+    const strictModuleHint = entities.module || String(context?.module || '').trim().toLowerCase() || null;
+    updateSessionState(session.id, {
+      language: strictEffectiveLanguage,
+      lastTaggedCaseId: strictCaseId,
+      lastTaggedCaseLabel: strictCaseLabel,
+      workspaceContext: rawWorkspaceContext || null
+    });
+
+    const strictResult = isStrictCaseSummaryIntent(messageValidation.text)
+      ? await buildCaseSummaryAnswer({ caseId: strictCaseId, message: messageValidation.text })
+      : await buildExactCaseAnswer({
+        caseId: strictCaseId,
+        caseLabel: strictCaseLabel,
+        message: messageValidation.text,
+        moduleHint: strictModuleHint
+      });
+
+    logState.route = strictResult.mode === 'summary' ? 'strict_case_summary' : `strict_case_${strictResult.mode}`;
+    logState.mode = strictResult.mode;
+    logState.assistantResponse = strictResult.responseText;
+    await logStrictCaseGroundedQuery({
+      req,
+      session,
+      caseId: strictCaseId,
+      message: messageValidation.text,
+      routeUsed: logState.route,
+      responseMode: strictResult.mode,
+      refusalCode: strictResult.refusalCode || null,
+      answerPayload: strictResult.answerPayload,
+      startedAt,
+      metadata: {
+        taggedCaseRef: explicitTaggedCaseRefs[0],
+        moduleHint: strictModuleHint,
+        caseLabel: strictCaseLabel
+      }
+    });
+    sendResponse({
+      res,
+      session,
+      responseText: strictResult.responseText,
+      mode: strictResult.mode,
+      logState,
+      effectiveLanguage: strictEffectiveLanguage,
+      confidenceInput: {
+        mode: strictResult.mode,
+        intentScore: 0.98,
+        intentLabel: strictResult.refusalCode || (strictResult.mode === 'summary' ? 'strict_case_summary' : 'strict_case_exact')
+      },
+      extra: {
+        answerPayload: strictResult.answerPayload,
+        reasonCode: strictResult.refusalCode || null,
+        caseId: strictCaseId,
+        caseLabel: strictCaseLabel
+      }
+    });
+    return;
     let workspaceContext = mergeWorkspaceContext(session.state || {}, rawWorkspaceContext);
     const hasExplicitCaseContext = Boolean(
       context?.caseId
@@ -1635,6 +1806,183 @@ const intentHandler = async (req, res) => {
     locals: req.locals || {}
   }, res);
 };
+
+const isStrictCaseSummaryIntent = (message = '') =>
+  /\b(summary|summarize|overview|brief|briefing|highlights|snapshot)\b/i.test(String(message || ''));
+
+const logStrictCaseGroundedQuery = async ({
+  req,
+  session,
+  caseId,
+  message,
+  routeUsed,
+  responseMode,
+  refusalCode = null,
+  answerPayload = null,
+  startedAt,
+  metadata = {},
+}) => {
+  await logCaseChatQuery({
+    caseId,
+    userId: req.user?.id || null,
+    sessionId: session?.id || null,
+    queryText: message,
+    routeUsed,
+    responseMode,
+    refusalCode,
+    latencyMs: Date.now() - startedAt,
+    freshness: answerPayload?.debugMeta?.freshness || {},
+    metadata,
+  });
+};
+
+const resolveCaseForCaseContextRoute = async (req, res) => {
+  const caseId = Number(req.query.caseId || req.query.case_id || 0);
+  const caseRef = String(req.query.caseRef || req.query.case_name || '').trim();
+  const resolved = await resolveCaseReference({
+    user: req.user || null,
+    caseId: Number.isFinite(caseId) && caseId > 0 ? caseId : null,
+    reference: caseRef || null,
+  });
+
+  if (!resolved?.caseRow || resolved?.ambiguous) {
+    res.status(404).json({
+      mode: 'refusal',
+      reasonCode: 'CASE_NOT_ACCESSIBLE',
+      error: 'Tagged case could not be resolved.',
+    });
+    return null;
+  }
+
+  return resolved.caseRow;
+};
+
+router.get('/case-context/summary', async (req, res) => {
+  const caseRow = await resolveCaseForCaseContextRoute(req, res);
+  if (!caseRow) return;
+  const module = String(req.query.module || '').trim().toLowerCase() || null;
+  const data = await getCaseContextSummary({ caseId: caseRow.id, module });
+  res.json({
+    mode: data ? 'summary' : 'refusal',
+    caseId: String(caseRow.id),
+    caseLabel: caseRow.case_name || caseRow.case_number || `Case ${caseRow.id}`,
+    module,
+    data,
+  });
+});
+
+router.get('/case-context/scalar', async (req, res) => {
+  const caseRow = await resolveCaseForCaseContextRoute(req, res);
+  if (!caseRow) return;
+  const module = String(req.query.module || '').trim().toLowerCase();
+  const metricKey = String(req.query.metricKey || '').trim();
+  if (!module || !metricKey) {
+    return res.status(400).json({ error: 'module and metricKey are required' });
+  }
+  const data = await getCaseContextScalar({ caseId: caseRow.id, module, metricKey });
+  res.json({
+    mode: data ? 'exact' : 'refusal',
+    caseId: String(caseRow.id),
+    caseLabel: caseRow.case_name || caseRow.case_number || `Case ${caseRow.id}`,
+    module,
+    metricKey,
+    data,
+  });
+});
+
+router.get('/case-context/top-entities', async (req, res) => {
+  const caseRow = await resolveCaseForCaseContextRoute(req, res);
+  if (!caseRow) return;
+  const module = String(req.query.module || '').trim().toLowerCase();
+  const metricKey = String(req.query.metricKey || '').trim();
+  const entityType = String(req.query.entityType || '').trim();
+  const limit = Math.max(1, Math.min(50, Number(req.query.limit || 5)));
+  if (!module || !metricKey || !entityType) {
+    return res.status(400).json({ error: 'module, metricKey and entityType are required' });
+  }
+  const rows = await getCaseContextTopEntities({ caseId: caseRow.id, module, metricKey, entityType, limit });
+  res.json({
+    mode: rows.length ? 'exact' : 'refusal',
+    caseId: String(caseRow.id),
+    caseLabel: caseRow.case_name || caseRow.case_number || `Case ${caseRow.id}`,
+    module,
+    metricKey,
+    entityType,
+    rows,
+  });
+});
+
+router.get('/case-context/time-series', async (req, res) => {
+  const caseRow = await resolveCaseForCaseContextRoute(req, res);
+  if (!caseRow) return;
+  const module = String(req.query.module || '').trim().toLowerCase();
+  const metricKey = String(req.query.metricKey || '').trim();
+  if (!module || !metricKey) {
+    return res.status(400).json({ error: 'module and metricKey are required' });
+  }
+  const rows = await getCaseContextTimeSeries({ caseId: caseRow.id, module, metricKey });
+  res.json({
+    mode: rows.length ? 'exact' : 'refusal',
+    caseId: String(caseRow.id),
+    caseLabel: caseRow.case_name || caseRow.case_number || `Case ${caseRow.id}`,
+    module,
+    metricKey,
+    rows,
+  });
+});
+
+router.get('/case-context/geo-facts', async (req, res) => {
+  const caseRow = await resolveCaseForCaseContextRoute(req, res);
+  if (!caseRow) return;
+  const module = String(req.query.module || '').trim().toLowerCase();
+  const dimensionKey = String(req.query.dimensionKey || req.query.dimension || '').trim();
+  const limit = Math.max(1, Math.min(50, Number(req.query.limit || 10)));
+  if (!module || !dimensionKey) {
+    return res.status(400).json({ error: 'module and dimensionKey are required' });
+  }
+  const rows = await getCaseContextGeoFacts({ caseId: caseRow.id, module, dimensionKey, limit });
+  res.json({
+    mode: rows.length ? 'exact' : 'refusal',
+    caseId: String(caseRow.id),
+    caseLabel: caseRow.case_name || caseRow.case_number || `Case ${caseRow.id}`,
+    module,
+    dimensionKey,
+    rows,
+  });
+});
+
+router.get('/case-context/artifact', async (req, res) => {
+  const caseRow = await resolveCaseForCaseContextRoute(req, res);
+  if (!caseRow) return;
+  const module = String(req.query.module || 'global').trim().toLowerCase() || 'global';
+  const artifactKey = String(req.query.artifactKey || 'case-summary.json').trim();
+  const artifact = await readCaseKnowledgeArtifact({ caseId: caseRow.id, module, artifactKey });
+  res.json({
+    mode: artifact ? 'summary' : 'refusal',
+    caseId: String(caseRow.id),
+    caseLabel: caseRow.case_name || caseRow.case_number || `Case ${caseRow.id}`,
+    module,
+    artifactKey,
+    artifact,
+  });
+});
+
+router.get('/case-context/cross-module-overlap', async (req, res) => {
+  const caseRow = await resolveCaseForCaseContextRoute(req, res);
+  if (!caseRow) return;
+  const entityValue = String(req.query.entityValue || '').trim();
+  if (!entityValue) {
+    return res.status(400).json({ error: 'entityValue is required' });
+  }
+  const rows = await getCrossModuleOverlap({ caseId: caseRow.id, entityValue });
+  res.json({
+    mode: rows.length ? 'exact' : 'refusal',
+    caseId: String(caseRow.id),
+    caseLabel: caseRow.case_name || caseRow.case_number || `Case ${caseRow.id}`,
+    entityValue,
+    rows,
+  });
+});
 
 router.get('/health', async (_req, res) => {
   let db = 'down';

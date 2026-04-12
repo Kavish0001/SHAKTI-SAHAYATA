@@ -10,6 +10,7 @@ import {
   getCaseModuleSummary,
   searchCasesForChat
 } from '../services/chatbot/caseContext.service.js';
+import { queueCaseKnowledgeRefresh } from '../services/chatbot/caseKnowledge.service.js';
 import { buildTimelineTimestamp } from '../utils/timestamps.js';
 
 const router = Router();
@@ -586,6 +587,7 @@ router.put('/:id', authenticateToken, requireCaseAccess('investigator'), checkEv
       [userId, req.user.buckleId, 'UPDATE_CASE', 'case', req.params.id, JSON.stringify({ updatedFields })]
     );
 
+    void queueCaseKnowledgeRefresh({ caseId: Number(req.params.id), modules: ['cdr', 'ipdr', 'sdr', 'tower', 'ild'], reason: 'case_metadata_updated' });
     res.json(result.rows[0]);
   } catch (err) {
     console.error('Update case error:', err);
@@ -615,6 +617,7 @@ router.post('/:id/archive', authenticateToken, requireCaseAccess('owner'), check
       [req.user.userId, req.user.buckleId, 'ARCHIVE_CASE', 'case', req.params.id]
     );
 
+    void queueCaseKnowledgeRefresh({ caseId: Number(req.params.id), modules: ['cdr', 'ipdr', 'sdr', 'tower', 'ild'], reason: 'case_archived' });
     res.json({ message: 'Case archived', case: result.rows[0] });
   } catch (err) {
     console.error('Archive case error:', err);
@@ -644,6 +647,7 @@ router.post('/:id/reopen', authenticateToken, requireCaseAccess('owner'), checkE
       [req.user.userId, req.user.buckleId, 'REOPEN_CASE', 'case', req.params.id]
     );
 
+    void queueCaseKnowledgeRefresh({ caseId: Number(req.params.id), modules: ['cdr', 'ipdr', 'sdr', 'tower', 'ild'], reason: 'case_reopened' });
     res.json({ message: 'Case reopened', case: result.rows[0] });
   } catch (err) {
     console.error('Reopen case error:', err);
@@ -691,6 +695,7 @@ router.post('/:id/lock', authenticateToken, requireRole('super_admin', 'station_
       ]
     );
 
+    void queueCaseKnowledgeRefresh({ caseId: Number(req.params.id), modules: ['cdr', 'ipdr', 'sdr', 'tower', 'ild'], reason: 'case_locked' });
     res.json({ message: 'Case evidence-locked', case: result.rows[0] });
   } catch (err) {
     res.status(500).json({ error: 'Failed to lock case' });
@@ -712,6 +717,7 @@ router.post('/:id/unlock', authenticateToken, requireRole('super_admin'), async 
       [req.user.userId, req.user.buckleId, 'UNLOCK_CASE', 'case', req.params.id]
     );
 
+    void queueCaseKnowledgeRefresh({ caseId: Number(req.params.id), modules: ['cdr', 'ipdr', 'sdr', 'tower', 'ild'], reason: 'case_unlocked' });
     res.json({ message: 'Case unlocked', case: result.rows[0] });
   } catch (err) {
     res.status(500).json({ error: 'Failed to unlock case' });

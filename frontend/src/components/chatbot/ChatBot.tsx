@@ -4,6 +4,7 @@ import { isPotentialPromptInjection, sanitizeUserText } from '../lib/security';
 import { useChatbotWorkspaceStore } from '../../stores/chatbotWorkspaceStore';
 import { apiClient, getAccessToken } from '../../lib/apiClient';
 import GroundedAnswerCard, { type ChatAnswerPayload, type ClarificationOption, type GroundedAnswerAction } from './GroundedAnswerCard';
+import ExactAnswerBlock from './ExactAnswerBlock';
 import { renderRichMessage } from './chatRichText';
 import {
   Bar,
@@ -159,12 +160,30 @@ const normalizeTagToken = (suggestion: CaseSuggestion) => {
   return `@${suggestion.id}`;
 };
 
-const extractExplicitTagRef = (value: string) => {
-  const quoted = value.match(/@"([^"]{2,})"/);
-  if (quoted?.[1]) return quoted[1].trim();
+const extractExplicitTagRefs = (value: string) => {
+  const refs: string[] = [];
+  const seen = new Set<string>();
+  const quoted = value.matchAll(/@"([^"]{2,})"/gi);
+  for (const match of quoted) {
+    const ref = String(match[1] || '').trim();
+    const key = ref.toLowerCase();
+    if (ref && !seen.has(key)) {
+      refs.push(ref);
+      seen.add(key);
+    }
+  }
 
-  const simple = value.match(/(?:^|\s)@([a-z0-9][a-z0-9_\-\/]{1,63})\b/i);
-  return simple?.[1]?.trim() || null;
+  const simple = value.matchAll(/(?:^|\s)@([a-z0-9][a-z0-9_\-\/]{1,63})\b/gi);
+  for (const match of simple) {
+    const ref = String(match[1] || '').trim();
+    const key = ref.toLowerCase();
+    if (ref && !seen.has(key)) {
+      refs.push(ref);
+      seen.add(key);
+    }
+  }
+
+  return refs;
 };
 
 const normalizeLookupValue = (value: string | null | undefined) =>
@@ -269,24 +288,8 @@ const toActiveCaseSuggestion = (suggestion: CompactCaseSuggestion): CaseSuggesti
   locked: true
 });
 
-const toResolvedCaseContext = (suggestion: CaseSuggestion): CaseContextSelection => ({
-  id: suggestion.id,
-  caseName: suggestion.caseName,
-  caseNumber: suggestion.caseNumber,
-  firNumber: suggestion.firNumber,
-  caseType: suggestion.caseType ?? null,
-  operator: suggestion.operator ?? null,
-  status: suggestion.status ?? null,
-  createdAt: suggestion.createdAt ?? null,
-  updatedAt: suggestion.updatedAt ?? null,
-  hasFiles: suggestion.hasFiles ?? false,
-  availability: suggestion.availability ?? null,
-  locked: true
-});
-
 export const ChatBot: React.FC<ChatBotProps> = ({ caseId, caseType }) => {
   const workspaceContext = useChatbotWorkspaceStore((state) => state.workspaceContext);
-  const [selectedCase, setSelectedCase] = useState<CaseContextSelection | null>(null);
   const [isOpen, setIsOpen] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isDarkTheme, setIsDarkTheme] = useState<boolean>(() => {
@@ -325,16 +328,6 @@ export const ChatBot: React.FC<ChatBotProps> = ({ caseId, caseType }) => {
     }
     return { width: 430, height: 560 };
   });
-
-  useEffect(() => {
-    if (!caseId) {
-      setSelectedCase(null);
-      return;
-    }
-    if (selectedCase && selectedCase.id !== caseId) {
-      setSelectedCase(null);
-    }
-  }, [caseId, selectedCase?.id]);
 
   useEffect(() => {
     if (typeof document === 'undefined') return;
@@ -381,7 +374,6 @@ export const ChatBot: React.FC<ChatBotProps> = ({ caseId, caseType }) => {
   const chatbotStreamUrl = useMemo(() => chatbotUrl.replace(/\/api\/chatbot\/intent$/i, '/api/chatbot/intent/stream'), [chatbotUrl]);
   const diagnosticsUrl = useMemo(() => chatbotUrl.replace(/\/api\/chatbot\/intent$/i, '/api/chatbot/diagnostics'), [chatbotUrl]);
   const ragPreviewUrl = useMemo(() => chatbotUrl.replace(/\/api\/chatbot\/intent$/i, '/api/chatbot/rag/preview'), [chatbotUrl]);
-  const chatbotSessionBaseUrl = useMemo(() => chatbotUrl.replace(/\/api\/chatbot\/intent$/i, '/api/chatbot/session'), [chatbotUrl]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -531,20 +523,6 @@ export const ChatBot: React.FC<ChatBotProps> = ({ caseId, caseType }) => {
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
   };
-
-
-
-  const resetServerSession = async (existingSessionId: string | null) => {
-    if (!existingSessionId) return;
-    try {
-      await fetchWithAuthRecovery(`${chatbotSessionBaseUrl}/${encodeURIComponent(existingSessionId)}`, {
-        method: 'DELETE',
-      });
-    } catch {
-      // Best effort only: we still clear the local session id.
-    }
-  };
-
   const applyCaseSuggestion = (suggestion: CaseSuggestion) => {
     const input = inputRef.current;
     const caret = input?.selectionStart ?? inputValue.length;
@@ -563,20 +541,6 @@ export const ChatBot: React.FC<ChatBotProps> = ({ caseId, caseType }) => {
       }, 0);
     }
 
-    setSelectedCase({
-      id: suggestion.id,
-      caseName: suggestion.caseName,
-      caseNumber: suggestion.caseNumber,
-      firNumber: suggestion.firNumber,
-      caseType: suggestion.caseType,
-      operator: suggestion.operator,
-      status: suggestion.status,
-      createdAt: suggestion.createdAt,
-      updatedAt: suggestion.updatedAt,
-      hasFiles: suggestion.hasFiles,
-      availability: suggestion.availability || null,
-      locked: true
-    });
     setCaseSuggestionOpen(false);
     setCaseSuggestions([]);
     setCaseSuggestionIndex(0);
@@ -624,7 +588,8 @@ export const ChatBot: React.FC<ChatBotProps> = ({ caseId, caseType }) => {
     const sourceText = typeof overrideText === 'string' ? overrideText : inputValue;
     const trimmed = sanitizeUserText(sourceText, 4000).trim();
     if (!trimmed) return;
-    const explicitTagRef = extractExplicitTagRef(trimmed);
+    const explicitTagRefs = extractExplicitTagRefs(trimmed);
+    const explicitTagRef = explicitTagRefs.length === 1 ? explicitTagRefs[0] : null;
 
     const isDiagnosticsCommand = /^\/(diag|diagnostics)\b/i.test(trimmed);
     const ragMatch = trimmed.match(/^\/rag\b\s*(.*)$/i);
@@ -651,7 +616,6 @@ export const ChatBot: React.FC<ChatBotProps> = ({ caseId, caseType }) => {
     setIsSending(true);
 
     try {
-      const previousSelectedCaseId = selectedCase?.id || caseId || null;
       let requestCase: CaseContextSelection | null = null;
       if (explicitTagRef) {
         try {
@@ -661,37 +625,32 @@ export const ChatBot: React.FC<ChatBotProps> = ({ caseId, caseType }) => {
           const resolvedSuggestion = exactMatch || suggestions[0] || null;
 
           if (resolvedSuggestion) {
-            const resolvedCase = toResolvedCaseContext(resolvedSuggestion);
-            requestCase = resolvedCase;
-            setSelectedCase(resolvedCase);
+            requestCase = {
+              id: resolvedSuggestion.id,
+              caseName: resolvedSuggestion.caseName,
+              caseNumber: resolvedSuggestion.caseNumber,
+              firNumber: resolvedSuggestion.firNumber,
+              caseType: resolvedSuggestion.caseType ?? null,
+              operator: resolvedSuggestion.operator ?? null,
+              status: resolvedSuggestion.status ?? null,
+              createdAt: resolvedSuggestion.createdAt ?? null,
+              updatedAt: resolvedSuggestion.updatedAt ?? null,
+              hasFiles: resolvedSuggestion.hasFiles ?? false,
+              availability: resolvedSuggestion.availability || null,
+              locked: true
+            };
           } else {
             requestCase = null;
-            setSelectedCase(null);
           }
         } catch {
           requestCase = null;
-          setSelectedCase(null);
         }
       }
 
-      const lockedCase = explicitTagRef ? requestCase : selectedCase;
-      const requestCaseId = lockedCase?.id || caseId || null;
-      const requestCaseType = lockedCase?.caseType || caseType || null;
-      const shouldResetSession = Boolean(
-        sessionId
-        && explicitTagRef
-        && (
-          !requestCaseId
-          || (previousSelectedCaseId && requestCaseId && previousSelectedCaseId !== requestCaseId)
-        )
-      );
-
-      let nextSessionId = sessionId;
-      if (shouldResetSession && sessionId) {
-        await resetServerSession(sessionId);
-        nextSessionId = null;
-        setSessionId(null);
-      }
+      const requestCaseId = explicitTagRef ? (requestCase?.id || null) : null;
+      const requestCaseType = explicitTagRef ? (requestCase?.caseType || caseType || null) : null;
+      const requestCaseName = explicitTagRef ? (requestCase?.caseName || null) : null;
+      const nextSessionId = sessionId;
 
       if (isDiagnosticsCommand) {
         const res = await fetchWithAuthRecovery(diagnosticsUrl, { method: 'GET' });
@@ -750,7 +709,7 @@ export const ChatBot: React.FC<ChatBotProps> = ({ caseId, caseType }) => {
           query: trimmed,
           sessionId: nextSessionId,
           case_id: requestCaseId,
-          case_name: lockedCase?.caseName || null,
+          case_name: requestCaseName,
           case_type: requestCaseType,
           workspaceContext,
           preferredLanguage: preferredLanguage === 'auto' ? null : preferredLanguage,
@@ -898,11 +857,12 @@ export const ChatBot: React.FC<ChatBotProps> = ({ caseId, caseType }) => {
   };
 
   const applyCompactCaseSuggestion = (suggestion: CompactCaseSuggestion) => {
-    const resolved = toResolvedCaseContext(toActiveCaseSuggestion(suggestion));
-    setSelectedCase(resolved);
+    const token = normalizeTagToken(toActiveCaseSuggestion(suggestion));
+    setInputValue((prev) => `${prev}${prev.trim() ? ' ' : ''}${token} `);
+    inputRef.current?.focus();
   };
 
-  const effectiveCase = selectedCase || (caseId
+  const routeCase = (caseId
     ? {
       id: caseId,
       caseName: caseId,
@@ -942,29 +902,11 @@ export const ChatBot: React.FC<ChatBotProps> = ({ caseId, caseType }) => {
               <div>
                 <div className="text-sm font-semibold">SHAKTI SAHAYATA</div>
                 <div className={`text-[11px] ${isDarkTheme ? 'text-slate-400' : 'text-slate-500'}`}>Online • Navigation and troubleshooting</div>
-                {effectiveCase ? (
+                {routeCase ? (
                   <div className="mt-1 flex items-center gap-2 flex-wrap">
                     <div className={`inline-flex items-center gap-2 rounded-full px-2 py-1 text-[10px] ${isDarkTheme ? 'bg-blue-500/15 text-blue-200' : 'bg-blue-100 text-blue-700'}`}>
                       <span className="material-symbols-outlined text-[13px]">gavel</span>
-                      <span>{effectiveCase.caseNumber || effectiveCase.caseName}</span>
-                      <button
-                        type="button"
-                        onClick={() => setInputValue('@')}
-                        className={`rounded-full px-1.5 py-0.5 ${isDarkTheme ? 'bg-slate-800 text-slate-200' : 'bg-white text-slate-600'}`}
-                      >
-                        Switch
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          void resetServerSession(sessionId);
-                          setSessionId(null);
-                          setSelectedCase(null);
-                        }}
-                        className={`rounded-full px-1.5 py-0.5 ${isDarkTheme ? 'bg-slate-800 text-slate-200' : 'bg-white text-slate-600'}`}
-                      >
-                        Clear
-                      </button>
+                      <span>{routeCase.caseNumber || routeCase.caseName}</span>
                     </div>
                     {workspaceContext?.module ? (
                       <div className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-[10px] ${isDarkTheme ? 'bg-emerald-500/15 text-emerald-200' : 'bg-emerald-100 text-emerald-700'}`}>
@@ -1019,7 +961,7 @@ export const ChatBot: React.FC<ChatBotProps> = ({ caseId, caseType }) => {
           <div className={`px-4 py-2 flex gap-2 flex-wrap border-b ${isDarkTheme ? 'border-white/10' : 'border-slate-200'}`}>
             {(() => {
               const module = workspaceContext?.module || null;
-              const hasCase = Boolean(effectiveCase?.id || caseId);
+              const hasCase = Boolean(routeCase?.id || caseId);
 
               const MODULE_PROMPTS: Record<string, Array<{ label: string; query: string }>> = {
                 cdr: [
@@ -1101,7 +1043,12 @@ export const ChatBot: React.FC<ChatBotProps> = ({ caseId, caseType }) => {
                       >
                         <span className="material-symbols-outlined text-[15px]">content_copy</span>
                       </button>
-                      {msg.answerPayload && msg.answerPayload.version === 'grounded-answer-v1' ? (
+                      {msg.answerPayload && msg.answerPayload.version === 'grounded-answer-v1' && (msg.answerPayload.kind === 'exact' || msg.answerPayload.kind === 'refusal') ? (
+                        <ExactAnswerBlock
+                          payload={msg.answerPayload}
+                          dark={isDarkTheme}
+                        />
+                      ) : msg.answerPayload && msg.answerPayload.version === 'grounded-answer-v1' ? (
                         <GroundedAnswerCard
                           payload={msg.answerPayload}
                           dark={isDarkTheme}
@@ -1158,7 +1105,7 @@ export const ChatBot: React.FC<ChatBotProps> = ({ caseId, caseType }) => {
                   value={inputValue}
                   onChange={(e) => setInputValue(e.target.value)}
                   onKeyDown={handleInputKeyDown}
-                  placeholder={effectiveCase ? 'Tag the case again in this message using @ before asking...' : 'Tag a case in this message using @ before asking a case question...'}
+                  placeholder={routeCase ? 'Tag the case in this message using @ before asking...' : 'Tag exactly one case in this message using @ before asking...'}
                   disabled={isBusy}
                   className={`w-full rounded-lg px-4 py-2 text-sm focus:outline-none focus:ring-1 ${isDarkTheme
                     ? 'bg-slate-800/80 text-slate-200 placeholder-slate-500 focus:ring-blue-500'

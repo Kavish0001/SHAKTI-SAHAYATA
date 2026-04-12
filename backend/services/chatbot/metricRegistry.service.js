@@ -33,8 +33,22 @@ const hasMeaningfulValue = (value) => {
 // Re-export catalog accessors as the metric registry API
 export const getMetricRegistry = () => getCaseQaCatalog();
 
-export const resolveMetricDefinition = ({ message = '', module = null, view = null } = {}) =>
-  resolveCaseQaCatalogEntry({ message, module, view });
+const relaxRankedMetricText = (message = '') =>
+  String(message || '')
+    .replace(/\btop\s+\d{1,3}\s+/gi, 'top ')
+    .replace(/\bmax\s+\d{1,3}\s+/gi, 'max ');
+
+export const resolveMetricDefinition = ({ message = '', module = null, view = null } = {}) => {
+  const direct = resolveCaseQaCatalogEntry({ message, module, view });
+  if (direct) return direct;
+
+  const relaxedMessage = relaxRankedMetricText(message);
+  if (relaxedMessage !== String(message || '')) {
+    return resolveCaseQaCatalogEntry({ message: relaxedMessage, module, view });
+  }
+
+  return null;
+};
 
 export const detectRequestedModule = (message = '') => {
   const text = normalizeCaseQaText(message);
